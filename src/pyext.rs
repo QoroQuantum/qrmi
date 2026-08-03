@@ -19,6 +19,7 @@ use crate::models::{Payload, ResourceDef, Target, TaskResult, TaskStatus};
 use crate::pasqal::PasqalCloud;
 use crate::pasqal::PasqalLocal;
 use crate::QuantumResource;
+use crate::maestro::MaestroLocal;
 use pyo3::prelude::*;
 use pyo3_stub_gen::{define_stub_info_gatherer, derive::*};
 use tokio::runtime::Runtime;
@@ -33,6 +34,7 @@ pub enum ResourceType {
     PasqalLocal,
     AliceBobFelis,
     IQMServer,
+    MaestroLocal,
 }
 
 #[gen_stub_pyclass]
@@ -98,6 +100,12 @@ impl PyQuantumResource {
                     return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
                 }
             },
+            ResourceType::MaestroLocal => match MaestroLocal::new(resource_id) {
+                Ok(v) => Box::new(v),
+                Err(e) => {
+                    return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
+                }
+            },
         };
 
         Ok(Self {
@@ -137,6 +145,7 @@ impl PyQuantumResource {
                 crate::models::ResourceType::PasqalLocal => ResourceType::PasqalLocal,
                 crate::models::ResourceType::AliceBobFelis => ResourceType::AliceBobFelis,
                 crate::models::ResourceType::IQMServer => ResourceType::IQMServer,
+                crate::models::ResourceType::MaestroLocal => ResourceType::MaestroLocal,
             }),
             Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
         }
@@ -265,6 +274,7 @@ impl PyResourceDef {
             crate::models::ResourceType::PasqalLocal => ResourceType::PasqalLocal,
             crate::models::ResourceType::AliceBobFelis => ResourceType::AliceBobFelis,
             crate::models::ResourceType::IQMServer => ResourceType::IQMServer,
+            crate::models::ResourceType::MaestroLocal => ResourceType::MaestroLocal,
         }
     }
 

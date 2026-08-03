@@ -18,6 +18,7 @@ use crate::iqm::IQMServer;
 use crate::models::{Config, ResourceType, TaskStatus};
 use crate::pasqal::PasqalCloud;
 use crate::pasqal::PasqalLocal;
+use crate::maestro::MaestroLocal;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -70,6 +71,15 @@ pub enum Payload {
         use_timeslot: c_int,
         /// Optional user-defined tag associated with the job
         tag: *mut c_char,
+    },
+    /// Payload for Maestro Local Server
+    MaestroLocal {
+        /// request (usually qasm string)
+        input: *mut c_char,
+        /// Job type (execute, estimate)
+        job_type: *mut c_char,
+        /// Configuration in json format
+        config: *mut c_char,
     },
 }
 
@@ -680,6 +690,13 @@ pub unsafe extern "C" fn qrmi_resource_new(
                 }
             },
             ResourceType::IQMServer => match IQMServer::new(id_str) {
+                Ok(v) => Box::new(v),
+                Err(err) => {
+                    _set_last_error(format!("{}", err));
+                    return std::ptr::null_mut();
+                }
+            },
+            ResourceType::MaestroLocal => match MaestroLocal::new(id_str) {
                 Ok(v) => Box::new(v),
                 Err(err) => {
                     _set_last_error(format!("{}", err));
