@@ -40,6 +40,15 @@ pub enum Payload {
         /// Optional user-defined tag associated with the job
         tag: Option<String>,
     },
+    /// Payload for Maestro Local Server
+    MaestroLocal {
+        /// request (usually qasm string)
+        input: String,
+        /// Job type (execute, estimate)
+        job_type: String,
+        /// Configuration in json format
+        config: String,
+    },
 }
 #[cfg(feature = "pyo3")]
 define_stub_info_gatherer!(stub_info);

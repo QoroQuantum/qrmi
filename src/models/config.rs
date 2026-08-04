@@ -39,6 +39,8 @@ pub enum ResourceType {
     AliceBobFelis,
     // IQM Server
     IQMServer,
+    /// Maestro Local
+    MaestroLocal,
 }
 impl<'de> serde::Deserialize<'de> for ResourceType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -53,6 +55,7 @@ impl<'de> serde::Deserialize<'de> for ResourceType {
             "pasqal-local" => Ok(ResourceType::PasqalLocal),
             "alice-bob-felis" => Ok(ResourceType::AliceBobFelis),
             "iqm-server" => Ok(ResourceType::IQMServer),
+            "maestro-local" => Ok(ResourceType::MaestroLocal),
             _ => Err(serde::de::Error::unknown_variant(
                 &s,
                 &[
@@ -62,6 +65,7 @@ impl<'de> serde::Deserialize<'de> for ResourceType {
                     "pasqal-local",
                     "alice-bob-felis",
                     "iqm-server",
+                    "maestro-local",
                 ],
             )),
         }
@@ -76,6 +80,7 @@ impl ResourceType {
             ResourceType::PasqalLocal => "pasqal-local",
             ResourceType::AliceBobFelis => "alice-bob-felis",
             ResourceType::IQMServer => "iqm-server",
+            ResourceType::MaestroLocal => "maestro-local",
         }
     }
 }
