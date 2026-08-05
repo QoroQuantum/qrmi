@@ -15,11 +15,11 @@ use crate::QuantumResource;
 use anyhow::anyhow;
 use anyhow::{bail, Result};
 //use log::warn;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 
-use maestro_local_api::maestro::session::{Session, Task, TaskConfig, TaskType};
+use maestro_local_api::maestro::session::{Session, Task, TaskType};
 
 use async_trait::async_trait;
 
@@ -44,6 +44,24 @@ impl MaestroLocal {
             backend_name: backend_name.to_string(),
             session_id: acquisition_token,
         })
+    }
+
+    fn get_session_id(&self) -> Result<u32> {
+        let token_var = format!("{}_QRMI_JOB_ACQUISITION_TOKEN", self.backend_name);
+        let env_session_id = env::var(&token_var);
+
+        if let Ok(si) = env_session_id {
+            let session_id = si
+                .parse::<u32>()
+                .map_err(|_| anyhow!("Invalid session ID: {}", si))?;
+            Ok(session_id)
+        } else if self.session_id.is_none() {
+            Err(anyhow!(
+                "Session ID not set. Please acquire a session first."
+            ))
+        } else {
+            Ok(self.session_id.unwrap())
+        }
     }
 }
 
@@ -75,14 +93,14 @@ impl QuantumResource for MaestroLocal {
         if let Some(old_session_id) = self.session_id {
             // check to see if the server accepts it
             let response = Session::session_exists(old_session_id).await;
-            if response.is_ok() && response.unwrap() == true {
+            if response.is_ok() && response.unwrap() {
                 return Ok(old_session_id.to_string());
             }
         }
 
         let session = Session::new();
-        if session.is_ok() {
-            let session_id = session.unwrap().get_id();
+        if let Ok(session) = session {
+            let session_id = session.get_id();
             self.session_id = Some(session_id);
             Ok(session_id.to_string())
         } else {
@@ -91,61 +109,235 @@ impl QuantumResource for MaestroLocal {
     }
 
     async fn release(&mut self, id: &str) -> Result<()> {
-        let token_var = format!("{}_QRMI_JOB_ACQUISITION_TOKEN", self.backend_name);
-        let env_session_id = env::var(&token_var);
+        let env_session_id = self.get_session_id();
 
-        let session_id;
-        if env_session_id.is_err() {
-            session_id = id
-                .parse::<u32>()
-                .map_err(|_| anyhow!("Invalid session ID: {}", id))?;
+        let session_id = if let Ok(env_session_id) = env_session_id {
+            env_session_id
         } else {
-            let si = env_session_id.unwrap();
-            session_id = si
-                .parse::<u32>()
-                .map_err(|_| anyhow!("Invalid session ID: {}", si))?;
-        }
+            id.parse::<u32>()
+                .map_err(|_| anyhow!("Invalid session ID: {}", id))?
+        };
 
         let session = Session { id: session_id };
+        let response = session.delete().await;
 
-        Err(anyhow!("release not available"))
+        match response {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(anyhow!("Failed to delete session")),
+            Err(e) => Err(anyhow!("Error deleting session: {}", e)),
+        }
     }
 
     async fn task_start(&mut self, payload: Payload) -> Result<String> {
-        let token_var = format!("{}_QRMI_JOB_ACQUISITION_TOKEN", self.backend_name);
-        let session_id = env::var(&token_var)
-            .map_err(|_| anyhow!("{token_var} environment variable is not set"))?;
+        let session_id = self.get_session_id()?;
 
         if let Payload::MaestroLocal {
             input,
             job_type,
+            qubits,
+            simulator_type,
+            simulation_method,
+            observables,
             config,
         } = payload
         {
-            Err(anyhow!("task_start not available for MaestroLocal payload"))
+            let session = Session { id: session_id };
+            let response = session.create_task().await;
+
+            if let Ok(task) = response {
+                let task_id = task.get_id();
+                // now set all the stuff and send it to be executed
+                if job_type == "EXECUTE" || job_type == "execute" || job_type == "Execute" {
+                    let result = task.set_type(TaskType::EXECUTE).await;
+                    match result {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            bail!("Failed to set task type");
+                        }
+                        Err(e) => {
+                            bail!("Error setting task type: {}", e);
+                        }
+                    };
+                } else if job_type == "ESTIMATE" || job_type == "estimate" || job_type == "Estimate"
+                {
+                    let result = task.set_type(TaskType::ESTIMATE).await;
+                    match result {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            bail!("Failed to set task type");
+                        }
+                        Err(e) => {
+                            bail!("Error setting task type: {}", e);
+                        }
+                    };
+
+                    if observables.is_empty() {
+                        bail!("Observables must be provided for ESTIMATE job type");
+                    } else {
+                        let result = task.set_observables_as_string(observables).await;
+                        match result {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                bail!("Failed to set observables");
+                            }
+                            Err(e) => {
+                                bail!("Error setting observables: {}", e);
+                            }
+                        };
+                    }
+                } else {
+                    bail!("Invalid job_type: {}", job_type);
+                }
+
+                let result = task.set_qubits(qubits).await;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        bail!("Failed to set qubits");
+                    }
+                    Err(e) => {
+                        bail!("Error setting qubits: {}", e);
+                    }
+                };
+                let result = task.set_simulator_type(simulator_type).await;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        bail!("Failed to set simulator type");
+                    }
+                    Err(e) => {
+                        bail!("Error setting simulator type: {}", e);
+                    }
+                };
+                let result = task.set_simulation_method(simulation_method).await;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        bail!("Failed to set simulation method");
+                    }
+                    Err(e) => {
+                        bail!("Error setting simulation method: {}", e);
+                    }
+                };
+
+                let result = task.set_qasm(input).await;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        bail!("Failed to set QASM");
+                    }
+                    Err(e) => {
+                        bail!("Error setting QASM: {}", e);
+                    }
+                };
+                let result = task.set_options_json(config).await;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        bail!("Failed to set options JSON");
+                    }
+                    Err(e) => {
+                        bail!("Error setting options JSON: {}", e);
+                    }
+                };
+
+                let result = task.execute().await;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        bail!("Failed to execute task");
+                    }
+                    Err(e) => {
+                        bail!("Error executing task: {}", e);
+                    }
+                };
+
+                Ok(task_id.to_string())
+            } else {
+                Err(anyhow!(
+                    "Failed to start task, reason: {}",
+                    response.unwrap_err()
+                ))
+            }
         } else {
             bail!(format!("Payload type is not supported. {:?}", payload))
         }
     }
 
     async fn task_stop(&mut self, task_id: &str) -> Result<()> {
-        Err(anyhow!("task_stop not available"))
+        let session_id = self.get_session_id()?;
+        let id = task_id
+            .parse::<u32>()
+            .map_err(|_| anyhow!("Invalid task ID: {}", task_id))?;
+
+        let task = Task { id, session_id };
+        task.cancel()
+            .await
+            .map_err(|e| anyhow!("Failed to cancel task: {}", e))?;
+
+        Ok(())
     }
 
     async fn task_status(&mut self, task_id: &str) -> Result<TaskStatus> {
-        Err(anyhow!("Task status not available"))
+        let session_id = self.get_session_id()?;
+        let id = task_id
+            .parse::<u32>()
+            .map_err(|_| anyhow!("Invalid task ID: {}", task_id))?;
+
+        let task = Task { id, session_id };
+
+        let response = task.finished().await;
+        if let Ok(finished) = response {
+            if finished {
+                Ok(TaskStatus::Completed)
+            } else {
+                let response = task.running().await;
+                if let Ok(running) = response {
+                    if running {
+                        Ok(TaskStatus::Running)
+                    } else {
+                        let response = task.exists().await;
+                        if let Ok(queued) = response {
+                            if queued {
+                                Ok(TaskStatus::Queued)
+                            } else {
+                                // it might not exist anymore, it doesn't mean it's Cancelled
+                                // might be finished but the results were retrieved so it doesn't exist anymore on the server
+                                // we need to store cancelled tasks here for knowing
+                                Ok(TaskStatus::Cancelled)
+                            }
+                        } else {
+                            Err(anyhow!(
+                                "Failed to get task queued status, reason: {}",
+                                response.unwrap_err()
+                            ))
+                        }
+                    }
+                } else {
+                    Err(anyhow!(
+                        "Failed to get task running status, reason: {}",
+                        response.unwrap_err()
+                    ))
+                }
+            }
+        } else {
+            Err(anyhow!(
+                "Failed to get task finished status, reason: {}",
+                response.unwrap_err()
+            ))
+        }
     }
 
-    async fn task_result(&mut self, task_id: &str) -> Result<TaskResult> {
+    async fn task_result(&mut self, _task_id: &str) -> Result<TaskResult> {
         Err(anyhow!("Task result not available"))
     }
 
-    async fn task_logs(&mut self, task_id: &str) -> Result<String> {
+    async fn task_logs(&mut self, _task_id: &str) -> Result<String> {
         Ok("Logging not implemented for this QuantumResource".to_string())
     }
 
     async fn target(&mut self) -> Result<Target> {
-        let mut resp = json!({});
+        let resp = json!({});
 
         Ok(Target {
             value: resp.to_string(),

@@ -46,6 +46,14 @@ pub enum Payload {
         input: String,
         /// Job type (execute, estimate)
         job_type: String,
+        /// qubits count
+        qubits: u32,
+        /// simulator type
+        simulator_type: u32,
+        /// simulation method
+        simulation_method: u32,
+        /// observables, if needed, pauli strings separated by ";"
+        observables: String,
         /// Configuration in json format
         config: String,
     },

@@ -10,8 +10,8 @@ pub enum TaskType {
 
 #[derive(Debug)]
 pub struct Task {
-    id: u32,
-    session_id: u32,
+    pub id: u32,
+    pub session_id: u32,
 }
 
 #[derive(Debug)]
@@ -156,11 +156,11 @@ impl TaskConfig {
 }
 
 impl Task {
-    pub async fn get_id(&self) -> u32 {
+    pub fn get_id(&self) -> u32 {
         self.id
     }
 
-    pub async fn get_session_id(&self) -> u32 {
+    pub fn get_session_id(&self) -> u32 {
         self.session_id
     }
 
@@ -231,6 +231,16 @@ impl Task {
             maestro_lib::Response::OK(executed) => Ok(executed),
             maestro_lib::Response::ERROR(err) => Err(format!("Failed to execute task: {}", err)),
             _ => Err("Unexpected response when executing task".to_string()),
+        }
+    }
+
+    pub async fn cancel(&self) -> Result<bool, String> {
+        let command = format!("SESSION {} TASK {} CANCEL\n", self.session_id, self.id);
+        let res = maestro_lib::send_command_close(&command);
+        match res {
+            maestro_lib::Response::OK(canceled) => Ok(canceled),
+            maestro_lib::Response::ERROR(err) => Err(format!("Failed to cancel task: {}", err)),
+            _ => Err("Unexpected response when canceling task".to_string()),
         }
     }
 
@@ -384,9 +394,8 @@ impl Task {
         }
     }
 
-    pub async fn set_options(&self, options: TaskConfig) -> Result<bool, String> {
-        let json_str = options.get_json();
-        let options_trimmed = json_str.trim().trim_end_matches(&['\n', '\r'][..]).trim();
+    pub async fn set_options_json(&self, options: String) -> Result<bool, String> {
+        let options_trimmed = options.trim().trim_end_matches(&['\n', '\r'][..]).trim();
         let command = format!(
             "SESSION {} TASK {} SET_OPTIONS {}\n",
             self.session_id, self.id, options_trimmed
@@ -399,5 +408,11 @@ impl Task {
             }
             _ => Err("Unexpected response when setting task options".to_string()),
         }
+    }
+
+    pub async fn set_options(&self, options: TaskConfig) -> Result<bool, String> {
+        let json_str = options.get_json();
+
+        self.set_options_json(json_str).await
     }
 }
