@@ -328,8 +328,27 @@ impl QuantumResource for MaestroLocal {
         }
     }
 
-    async fn task_result(&mut self, _task_id: &str) -> Result<TaskResult> {
-        Err(anyhow!("Task result not available"))
+    async fn task_result(&mut self, task_id: &str) -> Result<TaskResult> {
+        let session_id = self.get_session_id()?;
+        let id = task_id
+            .parse::<u32>()
+            .map_err(|_| anyhow!("Invalid task ID: {}", task_id))?;
+
+        let status = self.task_status(task_id).await?;
+        if status == TaskStatus::Completed {
+            let task = Task { id, session_id };
+            let response = task.get_results_as_string().await;
+            if let Ok(result) = response {
+                Ok(TaskResult { value: result })
+            } else {
+                Err(anyhow!(
+                    "Failed to get task result, reason: {}",
+                    response.unwrap_err()
+                ))
+            }
+        } else {
+            Err(anyhow!("Task result not available, task is not completed"))
+        }
     }
 
     async fn task_logs(&mut self, _task_id: &str) -> Result<String> {
@@ -350,3 +369,7 @@ impl QuantumResource for MaestroLocal {
         metadata
     }
 }
+
+#[cfg(test)]
+#[path = "tests/local.rs"]
+mod tests;

@@ -278,19 +278,28 @@ impl Task {
         }
     }
 
-    pub async fn get_results(&self) -> Result<TaskResult, String> {
+    pub async fn get_results_as_string(&self) -> Result<String, String> {
         let command = format!("SESSION {} TASK {} GET_RESULTS\n", self.session_id, self.id);
         let res = maestro_lib::send_command_close(&command);
         match res {
-            maestro_lib::Response::OkResponse(results) => {
-                let task_results = self.get_task_results_from_string(results);
-
-                Ok(task_results)
-            }
+            maestro_lib::Response::OkResponse(results) => Ok(results),
             maestro_lib::Response::ERROR(err) => {
                 Err(format!("Failed to get task results: {}", err))
             }
             _ => Err("Unexpected response when getting task results".to_string()),
+        }
+    }
+
+    pub async fn get_results(&self) -> Result<TaskResult, String> {
+        let results = self.get_results_as_string().await;
+
+        if let Ok(result) = results {
+            Ok(self.get_task_results_from_string(result))
+        } else {
+            Err(format!(
+                "Failed to get task results: {}",
+                results.unwrap_err()
+            ))
         }
     }
 

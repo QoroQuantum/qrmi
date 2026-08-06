@@ -64,38 +64,87 @@
                 }
             }
         },
-        {
-            "type": "object",
-            "description": "Payload for `iqm-server` QPU resource",
-            "required": [
-                "iqmjson",
-                "job_type"
+      {
+        "type": "object",
+        "description": "Payload for `iqm-server` QPU resource",
+        "required": [
+          "iqmjson",
+          "job_type"
+        ],
+        "properties": {
+          "iqmjson": {
+            "type": "string",
+            "description": "IQM JSON string."
+          },
+          "job_type": {
+            "type": "string",
+            "enum": [
+              "circuit",
+              "run",
+              "sweep"
             ],
-            "properties": {
-                "iqmjson": {
-                    "type": "string",
-                    "description": "IQM JSON string."
-                },
-                "job_type": {
-                    "type": "string",
-                    "enum": [
-                        "circuit",
-                        "run",
-                        "sweep"
-                    ],
-                    "description": "Job type."
-                },
-                "use_timeslot": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Set use_timeslot=true to submit the job to the timeslot queue instead of the default FIFO queue."
-                },
-                "tag": {
-                    "type": "string",
-                    "description": "Optional user-defined tag associated with the job. Can be used for external identification or filtering jobs. Max length is 50 characters."
-                }
-            }
+            "description": "Job type."
+          },
+          "use_timeslot": {
+            "type": "boolean",
+            "default": false,
+            "description": "Set use_timeslot=true to submit the job to the timeslot queue instead of the default FIFO queue."
+          },
+          "tag": {
+            "type": "string",
+            "description": "Optional user-defined tag associated with the job. Can be used for external identification or filtering jobs. Max length is 50 characters."
+          }
         }
+      },
+      {
+        "type": "object",
+        "description": "Payload for `maestro-local`",
+        "required": [
+          "input",
+          "job_type",
+          "qubits",
+          "simulator_type",
+          "simulation_method"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "qasm string."
+          },
+          "job_type": {
+            "type": "string",
+            "enum": [
+              "execute",
+              "estimate"
+            ],
+            "description": "Job type."
+          },
+          "qubits": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Number of qubits."
+          },
+          "simulator_type": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Simulator type."
+          },
+          "simulation_method": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Simulation method."
+          },
+          "observables": {
+            "type": "string",
+            "description": "Observables."
+          },
+          "config": {
+            "type": "string",
+            "description": "Optional configuration parameters for the job, in a json format."
+          }
+        }
+      }
+
     ]
 }
 
