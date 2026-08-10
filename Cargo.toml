@@ -101,3 +101,8 @@ path = "examples/qrmi/rust/pasqal_cloud/src/main.rs"
 [[example]]
 name = "qrmi-example-providers"
 path = "examples/qrmi/rust/resource_providers/src/main.rs"
+
+[[example]]
+name = "qrmi-example-maestro-local"
+path = "examples/qrmi/rust/maestro_local/src/main.rs"
+
