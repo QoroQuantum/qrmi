@@ -78,6 +78,14 @@ pub enum Payload {
         input: *mut c_char,
         /// Job type (execute, estimate)
         job_type: *mut c_char,
+        /// qubits count
+        qubits: u32,
+        /// simulator type
+        simulator_type: u32,
+        /// simulation method
+        simulation_method: u32,
+        /// observables, if needed, pauli strings separated by ";"
+        observables: *mut c_char,
         /// Configuration in json format
         config: *mut c_char,
     },
@@ -1088,6 +1096,38 @@ pub unsafe extern "C" fn qrmi_resource_task_start(
             job_type: type_str.to_string(),
             tag: tag_opt,
             use_timeslot: use_timeslot_opt,
+        });
+    } else if let Payload::MaestroLocal {
+        input,
+        job_type,
+        qubits,
+        simulator_type,
+        simulation_method,
+        observables,
+        config,
+    } = *payload
+    {
+        let Ok(input_str) = CStr::from_ptr(input).to_str() else {
+            return ReturnCode::Error;
+        };
+        let Ok(job_type_str) = CStr::from_ptr(job_type).to_str() else {
+            return ReturnCode::Error;
+        };
+        let Ok(observables_str) = CStr::from_ptr(observables).to_str() else {
+            return ReturnCode::Error;
+        };
+        let Ok(config_str) = CStr::from_ptr(config).to_str() else {
+            return ReturnCode::Error;
+        };
+
+        qrmi_payload = Some(crate::models::Payload::MaestroLocal {
+            input: input_str.to_string(),
+            job_type: job_type_str.to_string(),
+            qubits,
+            simulator_type,
+            simulation_method,
+            observables: observables_str.to_string(),
+            config: config_str.to_string(),
         });
     }
 

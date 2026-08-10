@@ -79,6 +79,7 @@ static const QrmiResourceType g_all_resource_types[] = {
     QRMI_RESOURCE_TYPE_PASQAL_LOCAL,
     QRMI_RESOURCE_TYPE_ALICE_BOB_FELIS,
     QRMI_RESOURCE_TYPE_IQM_SERVER,
+    QRMI_RESOURCE_TYPE_MAESTRO_LOCAL,
 };
 
 /**
@@ -140,7 +141,7 @@ static const char *task_status_to_string(QrmiTaskStatus s) {
  *   - [2] resource_type (string) canonical hyphenated name as returned by
  *         qrmi_config_resource_type_to_str(), e.g. "ibm-quantum-system",
  *         "qiskit-runtime-service", "pasqal-cloud", "pasqal-local",
- *         "alice-bob-felis", "iqm-server"
+ *         "alice-bob-felis", "iqm-server", "maestro-local"
  * @return Number of values pushed onto the Lua stack.
  *         On success: 1 (resource: qrmi.resource userdata)
  *         On failure: 2 (nil, err: string)
@@ -494,6 +495,59 @@ static int submit_alice_bob_felis_payload(lua_State *L, lua_qrmi_resource_t *ud,
 }
  
 /**
+ * @brief Build and submit a QRMI_PAYLOAD_MAESTRO_LOCAL payload from a Lua sub-table.
+ *
+ * Used for `resource:task_start()`'s "maestro_local" key. `job_type`
+ * defaults to "execute", `qubits`/`simulator_type`/`simulation_method`
+ * default to 0, and `observables`/`config` default to "" and "{}"
+ * respectively when omitted.
+ *
+ * @param L Lua state.
+ * @param ud Resource to submit the task on.
+ * @param variant_idx Stack index of the sub-table holding `input`, `job_type`,
+ *                     `qubits`, `simulator_type`, `simulation_method`,
+ *                     `observables`, and `config`.
+ * @return Number of values pushed onto the Lua stack (see l_task_start).
+ */
+static int submit_maestro_local_payload(lua_State *L, lua_qrmi_resource_t *ud, int variant_idx) {
+    lua_getfield(L, variant_idx, "input");
+    const char *input = luaL_checkstring(L, -1);
+    lua_getfield(L, variant_idx, "job_type");
+    const char *job_type = luaL_optstring(L, -1, "execute");
+    lua_getfield(L, variant_idx, "qubits");
+    lua_Integer qubits = luaL_optinteger(L, -1, 0);
+    lua_getfield(L, variant_idx, "simulator_type");
+    lua_Integer simulator_type = luaL_optinteger(L, -1, 0);
+    lua_getfield(L, variant_idx, "simulation_method");
+    lua_Integer simulation_method = luaL_optinteger(L, -1, 0);
+    lua_getfield(L, variant_idx, "observables");
+    const char *observables = luaL_optstring(L, -1, "");
+    lua_getfield(L, variant_idx, "config");
+    const char *config = luaL_optstring(L, -1, "{}");
+
+    QrmiPayload payload;
+    payload.tag = QRMI_PAYLOAD_MAESTRO_LOCAL;
+    payload.MAESTRO_LOCAL.input = (char *)input;
+    payload.MAESTRO_LOCAL.job_type = (char *)job_type;
+    payload.MAESTRO_LOCAL.qubits = (uint32_t)qubits;
+    payload.MAESTRO_LOCAL.simulator_type = (uint32_t)simulator_type;
+    payload.MAESTRO_LOCAL.simulation_method = (uint32_t)simulation_method;
+    payload.MAESTRO_LOCAL.observables = (char *)observables;
+    payload.MAESTRO_LOCAL.config = (char *)config;
+
+    char *task_id = NULL;
+    QrmiReturnCode rc = qrmi_resource_task_start(ud->handle, &payload, &task_id);
+
+    lua_settop(L, variant_idx - 1); /* drop variant table and its fields */
+
+    if (rc != QRMI_RETURN_CODE_SUCCESS) return push_qrmi_error(L, rc);
+
+    lua_pushstring(L, task_id);
+    qrmi_string_free(task_id);
+    return 1;
+}
+
+/**
  * @brief `resource:task_start(payload)` - Start a task.
  *
  * Wraps qrmi_resource_task_start(). Mirrors the C API's QrmiPayload tagged
@@ -527,6 +581,19 @@ static int submit_alice_bob_felis_payload(lua_State *L, lua_qrmi_resource_t *ud,
  *       alice_bob_felis = {
  *           human_qir = qir_str,          -- human-readable QIR input
  *           input_params = json_str,      -- input parameters, JSON format
+ *       }
+ *   }
+ *
+ *   -- Maestro Local
+ *   payload = {
+ *       maestro_local = {
+ *           input = qasm_str,             -- request (usually a QASM string)
+ *           job_type = "execute",         -- optional, "execute" or "estimate", defaults to "execute"
+ *           qubits = 5,                   -- optional, defaults to 0
+ *           simulator_type = 0,           -- optional, defaults to 0 (aer)
+ *           simulation_method = 0,        -- optional, defaults to 0 (statevector)
+ *           observables = "ZZ;XX",        -- optional, required for "estimate" job_type
+ *           config = "{}",                -- optional, JSON format, defaults to "{}"
  *       }
  *   }
  * @endcode
@@ -581,12 +648,19 @@ static int l_task_start(lua_State *L) {
         return submit_alice_bob_felis_payload(L, ud, variant_idx);
     }
     lua_pop(L, 1);
- 
+
+    lua_getfield(L, 2, "maestro_local");
+    if (lua_istable(L, -1)) {
+        variant_idx = lua_gettop(L);
+        return submit_maestro_local_payload(L, ud, variant_idx);
+    }
+    lua_pop(L, 1);
+
     lua_pushnil(L);
     lua_pushstring(L,
         "task_start: payload table must contain one of 'qiskit_primitive', "
         "'iqm_server', 'pasqal_cloud' (used for both Pasqal Cloud and "
-        "Pasqal Local resources), or 'alice_bob_felis'");
+        "Pasqal Local resources), 'alice_bob_felis', or 'maestro_local'");
     return 2;
 }
 

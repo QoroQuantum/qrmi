@@ -4,3 +4,4 @@
 * [IBM Qiskit Runtime Service/Quantum System](./ibm)
 * [IQM Server](./iqm)
 * [Pasqal Cloud/Local](./pasqal)
+* [Maestro Local](./maestro)
