@@ -286,6 +286,18 @@ impl QuantumResource for MaestroLocal {
 
         let task = Task { id, session_id };
 
+        let response = task.failed().await;
+        if let Ok(failed) = response {
+            if failed {
+                return Ok(TaskStatus::Failed);
+            }
+        } else {
+            return Err(anyhow!(
+                "Failed to get task failed status, reason: {}",
+                response.unwrap_err()
+            ));
+        }
+
         let response = task.finished().await;
         if let Ok(finished) = response {
             if finished {

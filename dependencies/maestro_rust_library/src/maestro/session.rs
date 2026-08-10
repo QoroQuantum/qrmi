@@ -224,6 +224,18 @@ impl Task {
         }
     }
 
+    pub async fn failed(&self) -> Result<bool, String> {
+        let command = format!("SESSION {} TASK {} FAILED\n", self.session_id, self.id);
+        let res = maestro_lib::send_command_close(&command);
+        match res {
+            maestro_lib::Response::OK(failed) => Ok(failed),
+            maestro_lib::Response::ERROR(err) => {
+                Err(format!("Failed to check if task is failed: {}", err))
+            }
+            _ => Err("Unexpected response when checking if task is failed".to_string()),
+        }
+    }
+
     pub async fn execute(&self) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} EXECUTE\n", self.session_id, self.id);
         let res = maestro_lib::send_command_close(&command);

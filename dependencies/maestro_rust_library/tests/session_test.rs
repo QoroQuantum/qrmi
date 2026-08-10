@@ -128,6 +128,17 @@ fn session_task_execution_test() {
             "Task should not be finished after creation"
         );
 
+        let task_failed = task.failed().await;
+        assert!(
+            task_failed.is_ok(),
+            "Failed to check if task is failed: {:?}",
+            task_failed
+        );
+        assert!(
+            !task_failed.unwrap(),
+            "Task should not be failed after creation"
+        );
+
         // try to run it, should fail
         let task_run = task.execute().await;
         assert!(task_run.is_err(), "Failed to run task: {:?}", task_run);
