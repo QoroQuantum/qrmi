@@ -80,6 +80,7 @@ class App:
         "pasqal-cloud": ResourceType.PasqalCloud,
         "iqm-server": ResourceType.IQMServer,
         "alice-bob-felis": ResourceType.AliceBobFelis,
+        "maestro-local": ResourceType.MaestroLocal,
     }
 
     def __init__(self, name: str, input_filename: str, output_filename: str):
@@ -194,6 +195,18 @@ class App:
                 payload = Payload.AliceBobFelis(
                     human_qir=json.dumps(task_input["human_qir"]),
                     input_params=json.dumps(task_input["input_params"]),
+                )
+            elif res_type in [
+                ResourceType.MaestroLocal,
+            ]:
+                payload = Payload.MaestroLocal(
+                    input=task_input["input"],
+                    job_type=task_input["job_type"],
+                    qubits=task_input["qubits"],
+                    simulator_type=task_input["simulator_type"],
+                    simulation_method=task_input["simulation_method"],
+                    observables=task_input.get("observables", ""),
+                    config=task_input.get("config", "{}"),
                 )
             else:
                 payload = Payload.PasqalCloud(
