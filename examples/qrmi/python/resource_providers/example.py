@@ -21,12 +21,16 @@ import argparse
 from dotenv import load_dotenv
 from qrmi import Config, ResourceProvider
 
-parser = argparse.ArgumentParser(
-    description="Unified QRMI Provider Example"
-)
+parser = argparse.ArgumentParser(description="Unified QRMI Provider Example")
 parser.add_argument("config_file", help="Path to qrmi_config.json")
-parser.add_argument("resource_name", help="Name of the dynamic resource definition (is_dynamic=true)")
-parser.add_argument("--filters", default=None, help="Optional filter string e.g. 'num_qubits=127&name=ibm_*'")
+parser.add_argument(
+    "resource_name", help="Name of the dynamic resource definition (is_dynamic=true)"
+)
+parser.add_argument(
+    "--filters",
+    default=None,
+    help="Optional filter string e.g. 'num_qubits=127&name=ibm_*'",
+)
 args = parser.parse_args()
 
 load_dotenv()
@@ -39,4 +43,6 @@ provider = ResourceProvider(resource_def.resource_type, resource_def.environment
 resources = provider.resources(args.filters)
 
 for qrmi in resources:
-    print(f"Selected resource: id={qrmi.resource_id()} type={str(qrmi.resource_type())}")
+    print(
+        f"Selected resource: id={qrmi.resource_id()} type={str(qrmi.resource_type())}"
+    )
