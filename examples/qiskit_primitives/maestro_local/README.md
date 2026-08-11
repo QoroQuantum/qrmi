@@ -51,3 +51,18 @@ prints the results.
 ```shell-session
 $ python estimator.py
 ```
+
+## Running as a Slurm job with task_runner
+
+The two scripts above submit and poll the task themselves, which is useful for
+interactive/local development. To instead run the same kind of workload as a
+Slurm job, generate a JSON input file and hand it to the `task_runner`
+executable:
+
+* [examples/task_runner/maestro_local](../../task_runner/maestro_local) builds
+  the same kind of circuits with Qiskit and writes them out as `task_runner`
+  input files instead of submitting them directly.
+* See the [task_runner documentation](../../../python/qrmi/tools/task_runner/README.md#maestro-local)
+  for how to set the required environment variables (including the session
+  acquisition token) and invoke `task_runner` against a Maestro Local
+  resource, from a Slurm job script or locally.
