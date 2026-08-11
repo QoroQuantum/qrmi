@@ -150,9 +150,10 @@ CARGO_TARGET_DIR=./target/release/maturin maturin build --release --features pyo
 
 ### Examples
 
-* [Examples in Rust](./examples/qrmi/rust)
-* [Examples in Python](./examples/qrmi/python)
-* [Examples in C](./examples/qrmi/c)
+* [QRMI Language Bindings](./examples/qrmi) — Rust, Python, C and Lua examples for IBM, Pasqal, IQM, Alice & Bob, and Maestro Local
+* [Python examples for Pulser backend](./examples/pulser)
+* [Qiskit examples](./examples/qiskit_primitives) — IBM, Pasqal, IQM, and Maestro Local
+* [Examples of generating input payloads for the QRMI task runner](./examples/task_runner) — IBM, Pasqal, IQM, and Maestro Local
 
 
 ### Logging
