@@ -52,6 +52,9 @@ pip install "qrmi[ibm,pasqal]"
 > [!NOTE]
 > Note: `alice-bob` cannot be installed alongside `ibm` or `iqm`, as it depends on Qiskit versions earlier than 2.0.
 
+> [!NOTE]
+> Maestro Local requires no optional extra; `pip install qrmi` is sufficient, as it connects to a locally running Maestro server over a Unix domain socket. The [Maestro Local examples](https://github.com/qiskit-community/qrmi/blob/main/examples/qiskit_primitives/maestro_local) additionally require `qiskit` to build circuits.
+
 Pip will handle all dependencies automatically and you will always install the latest (and well-tested) version.
 
 To install from source, follow the instructions in the [documentation](https://github.com/qiskit-community/qrmi/blob/main/INSTALL.md).
