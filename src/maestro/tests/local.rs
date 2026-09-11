@@ -49,3 +49,17 @@ async fn acquire_release_session() {
         .await
         .expect("release should succeed");
 }
+
+// Regression coverage for the shared resource factory introduced in QRMI 0.24.
+#[tokio::test]
+async fn configured_maestro_resource_uses_shared_factory() {
+    let resource_type: ResourceType = serde_json::from_str("\"maestro-local\"").unwrap();
+    assert_eq!(resource_type, ResourceType::MaestroLocal);
+    assert_eq!(resource_type.as_str(), "maestro-local");
+    let mut resource = crate::common::create_resource(&resource_type, "sync_test_maestro").unwrap();
+    assert_eq!(resource.resource_id().await.unwrap(), "sync_test_maestro");
+    assert_eq!(
+        resource.resource_type().await.unwrap(),
+        ResourceType::MaestroLocal
+    );
+}

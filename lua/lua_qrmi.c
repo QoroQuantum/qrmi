@@ -74,6 +74,7 @@ static int push_qrmi_error(lua_State *L, QrmiReturnCode rc) {
 /** @brief All QrmiResourceType variants, used to drive the string <-> enum lookup below. */
 static const QrmiResourceType g_all_resource_types[] = {
     QRMI_RESOURCE_TYPE_IBM_QUANTUM_SYSTEM,
+    QRMI_RESOURCE_TYPE_IBM_QUANTUM_COMPUTE_SERVICE,
     QRMI_RESOURCE_TYPE_QISKIT_RUNTIME_SERVICE,
     QRMI_RESOURCE_TYPE_PASQAL_CLOUD,
     QRMI_RESOURCE_TYPE_PASQAL_LOCAL,
@@ -87,7 +88,7 @@ static const QrmiResourceType g_all_resource_types[] = {
  *
  * Rather than hardcoding a string table, this matches against the
  * canonical names returned by qrmi_config_resource_type_to_str() (e.g.
- * "qiskit-runtime-service", hyphen-separated, matching qrmi_config.json's
+ * "ibm-quantum-compute-service", hyphen-separated, matching qrmi_config.json's
  * convention), so the accepted spelling always tracks the library.
  *
  * @param s Resource type name, e.g. "ibm-quantum-system".
@@ -140,8 +141,9 @@ static const char *task_status_to_string(QrmiTaskStatus s) {
  *   - [1] resource_id (string)   e.g. "ibm_kingston"
  *   - [2] resource_type (string) canonical hyphenated name as returned by
  *         qrmi_config_resource_type_to_str(), e.g. "ibm-quantum-system",
- *         "qiskit-runtime-service", "pasqal-cloud", "pasqal-local",
- *         "alice-bob-felis", "iqm-server", "maestro-local"
+ *         "ibm-quantum-compute-service", "qiskit-runtime-service"(deprecated),
+ *         "pasqal-cloud", "pasqal-local", "alice-bob-felis", "iqm-server",
+ *         "maestro-local"
  * @return Number of values pushed onto the Lua stack.
  *         On success: 1 (resource: qrmi.resource userdata)
  *         On failure: 2 (nil, err: string)

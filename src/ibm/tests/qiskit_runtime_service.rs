@@ -13,7 +13,7 @@
 use super::super::IBMQiskitRuntimeService;
 use crate::models::ResourceType;
 use crate::QuantumResource;
-use qiskit_runtime_client::apis::configuration;
+use quantum_compute_client::apis::configuration;
 
 #[tokio::test]
 async fn resource_id_and_type_match_backend() {
