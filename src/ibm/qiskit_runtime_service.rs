@@ -1,6 +1,6 @@
 // This code is part of Qiskit.
 //
-// Copyright (C): 2025 UKRI-STFC (Hartree Centre)
+// Copyright (C): 2025-2026 UKRI-STFC (Hartree Centre)
 //
 // This code is licensed under the Apache License, Version 2.0. You may
 // obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -12,7 +12,7 @@
 
 // This code is part of Qiskit.
 //
-// (C) Copyright IBM 2025
+// (C) Copyright IBM 2025-2026
 //
 // This code is licensed under the Apache License, Version 2.0. You may
 // obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -22,17 +22,19 @@
 // copyright notice, and modified files need to carry a notice indicating
 // that they have been altered from the originals.
 
+use crate::error::{required_env, QrmiError};
+use crate::ibm::error::{classify, IbmError, ResourceKind};
 use crate::ibm::qiskit_runtime_service::models::{
     CreateJobRequestOneOfAllOfParams, EstimatorV2Input, NoiseLearnerInput, SamplerV2Input,
 };
 use crate::models::{Payload, ResourceType, Target, TaskResult, TaskStatus};
-use crate::QuantumResource;
-use anyhow::{anyhow, bail, Result};
+use crate::{QuantumResource, Result};
 use log::error;
-use qiskit_runtime_client::apis::{auth, backends_api, configuration, jobs_api, sessions_api};
-use qiskit_runtime_client::models;
-use qiskit_runtime_client::models::create_job_request_one_of::LogLevel;
-use qiskit_runtime_client::models::create_session_request_one_of::Mode;
+use quantum_compute_client::apis::{auth, backends_api, configuration, jobs_api, sessions_api};
+use quantum_compute_client::models;
+use quantum_compute_client::models::create_job_request_one_of::LogLevel;
+use quantum_compute_client::models::create_session_request_one_of::Mode;
+
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
@@ -67,22 +69,10 @@ impl IBMQiskitRuntimeService {
     /// * QRMI_IBM_QRS_TIMEOUT_SECONDS or QRMI_JOB_TIMEOUT_SECONDS - (optional) Cost for the job (seconds)
     /// * QRMI_IBM_QRS_SESSION_ID or QRMI_JOB_ACQUISITION_TOKEN - (optional) pre‐set session ID
     pub fn new(backend_name: &str) -> Result<Self> {
-        let qrs_endpoint =
-            env::var(format!("{backend_name}_QRMI_IBM_QRS_ENDPOINT")).map_err(|_| {
-                anyhow!("{backend_name}_QRMI_IBM_QRS_ENDPOINT environment variable is not set")
-            })?;
-        let iam_endpoint =
-            env::var(format!("{backend_name}_QRMI_IBM_QRS_IAM_ENDPOINT")).map_err(|_| {
-                anyhow!("{backend_name}_QRMI_IBM_QRS_IAM_ENDPOINT environment variable is not set")
-            })?;
-        let api_key =
-            env::var(format!("{backend_name}_QRMI_IBM_QRS_IAM_APIKEY")).map_err(|_| {
-                anyhow!("{backend_name}_QRMI_IBM_QRS_IAM_APIKEY environment variable is not set")
-            })?;
-        let service_crn =
-            env::var(format!("{backend_name}_QRMI_IBM_QRS_SERVICE_CRN")).map_err(|_| {
-                anyhow!("{backend_name}_QRMI_IBM_QRS_SERVICE_CRN environment variable is not set")
-            })?;
+        let qrs_endpoint = required_env(format!("{backend_name}_QRMI_IBM_QRS_ENDPOINT"))?;
+        let iam_endpoint = required_env(format!("{backend_name}_QRMI_IBM_QRS_IAM_ENDPOINT"))?;
+        let api_key = required_env(format!("{backend_name}_QRMI_IBM_QRS_IAM_APIKEY"))?;
+        let service_crn = required_env(format!("{backend_name}_QRMI_IBM_QRS_SERVICE_CRN"))?;
         let session_mode = env::var(format!("{backend_name}_QRMI_IBM_QRS_SESSION_MODE"))
             .unwrap_or_else(|_| "dedicated".to_string());
         let session_max_ttl: i32 = env::var(format!("{backend_name}_QRMI_IBM_QRS_SESSION_MAX_TTL"))
@@ -144,21 +134,16 @@ impl QuantumResource for IBMQiskitRuntimeService {
         {
             error!("Token renewal failed: {:?}", e);
         }
-        match backends_api::get_backend_status(&self.config, &self.backend_name, None).await {
-            Ok(status_response) => {
-                // Print the status, using "unknown" if no status is available
-                let status_str = status_response
-                    .status
-                    .unwrap_or_else(|| "unknown".to_string());
-                // Return true if status is "active" or "online"
-                Ok(status_str.to_lowercase() == "active" || status_str.to_lowercase() == "online")
-            }
-            Err(err) => {
-                // Print a message indicating an error occurred
-                error!("status: error ({:?})", err);
-                bail!(format!("Failed to get backend status: {:?}", &err));
-            }
-        }
+        let status_response =
+            backends_api::get_backend_status(&self.config, &self.backend_name, None)
+                .await
+                .map_err(|e| classify(e, ResourceKind::Backend))?;
+        // Print the status, using "unknown" if no status is available
+        let status_str = status_response
+            .status
+            .unwrap_or_else(|| "unknown".to_string());
+        // Return true if status is "active" or "online"
+        Ok(status_str.to_lowercase() == "active" || status_str.to_lowercase() == "online")
     }
 
     /// Creates a new session.
@@ -180,8 +165,9 @@ impl QuantumResource for IBMQiskitRuntimeService {
         }
 
         if let Some(existing_session_id) = self.session_id.clone() {
-            let response =
-                sessions_api::get_session(&self.config, &existing_session_id, None).await?;
+            let response = sessions_api::get_session(&self.config, &existing_session_id, None)
+                .await
+                .map_err(|e| classify(e, ResourceKind::Session))?;
             let active_ttl = response.active_ttl.unwrap_or(1);
             let max_ttl = response.max_ttl.unwrap_or(1);
 
@@ -195,7 +181,7 @@ impl QuantumResource for IBMQiskitRuntimeService {
         let mode_value = match self.session_mode.to_lowercase().as_str() {
             "batch" => Mode::Batch,
             "dedicated" => Mode::Dedicated,
-            other => bail!(format!("Invalid session mode: {}", other)),
+            other => return Err(IbmError::InvalidSessionMode(other.to_string()).into()),
         };
         let create_session_request_one_of = models::CreateSessionRequestOneOf {
             max_ttl: Some(self.session_max_ttl),
@@ -207,7 +193,9 @@ impl QuantumResource for IBMQiskitRuntimeService {
             Box::new(create_session_request_one_of),
         );
         let response =
-            sessions_api::create_session(&self.config, None, Some(create_session_request)).await?;
+            sessions_api::create_session(&self.config, None, Some(create_session_request))
+                .await
+                .map_err(|e| classify(e, ResourceKind::Session))?;
 
         self.session_id = Some(response.id.clone());
         Ok(response.id)
@@ -248,7 +236,8 @@ impl QuantumResource for IBMQiskitRuntimeService {
             Some(acquisition_token),
             None,
         )
-        .await?;
+        .await
+        .map_err(|e| classify(e, ResourceKind::Session))?;
 
         if let Some(pending_jobs) = jobs_resp.jobs {
             if !pending_jobs.is_empty() {
@@ -261,7 +250,9 @@ impl QuantumResource for IBMQiskitRuntimeService {
             // Note) According to the REST API documentation, this API is labeled as “Close job session,”
             // but its actual behavior matches Qiskit’s cancel operation. Calling this API results
             // in the session appearing as “Cancelled” on the IQP web interface
-            sessions_api::delete_session_close(&self.config, acquisition_token, None).await?;
+            sessions_api::delete_session_close(&self.config, acquisition_token, None)
+                .await
+                .map_err(|e| classify(e, ResourceKind::Session))?;
         } else {
             // Close this session as is — the behavior is consistent with the implementation in qiskit-ibm-runtim.
             // Displays “Completed” on the IQP web.
@@ -271,7 +262,8 @@ impl QuantumResource for IBMQiskitRuntimeService {
                 None,
                 Some(models::UpdateSessionRequest::new(false)),
             )
-            .await?;
+            .await
+            .map_err(|e| classify(e, ResourceKind::Session))?;
         }
         self.session_id = None;
         Ok(())
@@ -311,9 +303,7 @@ impl QuantumResource for IBMQiskitRuntimeService {
                     let parsed = serde_json::from_value::<NoiseLearnerInput>(val)?;
                     CreateJobRequestOneOfAllOfParams::NoiseLearnerInput(Box::new(parsed))
                 }
-                &_ => {
-                    bail!("Unsupported program id: {:?}", program_id);
-                }
+                &_ => return Err(IbmError::UnknownProgramId(format!("{program_id:?}")).into()),
             };
             let create_job_request_one_of = models::CreateJobRequestOneOf {
                 program_id,
@@ -330,12 +320,13 @@ impl QuantumResource for IBMQiskitRuntimeService {
             let create_job_request = models::CreateJobRequest::CreateJobRequestOneOf(Box::new(
                 create_job_request_one_of,
             ));
-            let response =
-                jobs_api::create_job(&self.config, None, None, Some(create_job_request)).await?;
+            let response = jobs_api::create_job(&self.config, None, None, Some(create_job_request))
+                .await
+                .map_err(|e| classify(e, ResourceKind::Backend))?;
 
             Ok(response.id)
         } else {
-            bail!("Payload type is not supported: {:?}", payload)
+            Err(QrmiError::UnsupportedPayload(format!("{payload:?}")))
         }
     }
 
@@ -356,7 +347,9 @@ impl QuantumResource for IBMQiskitRuntimeService {
         {
             error!("Token renewal failed: {:?}", e);
         }
-        let job_details = jobs_api::get_job(&self.config, task_id, None, None).await?;
+        let job_details = jobs_api::get_job(&self.config, task_id, None, None)
+            .await
+            .map_err(|e| classify(e, ResourceKind::Job))?;
         let status = job_details.status;
         if status == models::job_response::Status::Running
             || status == models::job_response::Status::Queued
@@ -384,7 +377,9 @@ impl QuantumResource for IBMQiskitRuntimeService {
         {
             error!("Token renewal failed: {:?}", e);
         }
-        let job_details = jobs_api::get_job(&self.config, task_id, None, None).await?;
+        let job_details = jobs_api::get_job(&self.config, task_id, None, None)
+            .await
+            .map_err(|e| classify(e, ResourceKind::Job))?;
         let status = job_details.status;
         match status {
             models::job_response::Status::Running => Ok(TaskStatus::Running),
@@ -412,19 +407,28 @@ impl QuantumResource for IBMQiskitRuntimeService {
         {
             error!("Token renewal failed: {:?}", e);
         } // Check if the task is completed before fetching the results.
-        let job_details = jobs_api::get_job(&self.config, task_id, None, None).await?;
+        let job_details = jobs_api::get_job(&self.config, task_id, None, None)
+            .await
+            .map_err(|e| classify(e, ResourceKind::Job))?;
         let status = job_details.status;
         if status != models::job_response::Status::Completed {
-            bail!("Task is not completed. Current status: {:?}", status);
+            return Err(QrmiError::TaskNotReady {
+                task_id: task_id.to_string(),
+                reason: format!("task is not completed (current status: {status:?})"),
+            });
         }
-        let results = jobs_api::get_job_results_jid(&self.config, task_id, None).await?;
+        let results = jobs_api::get_job_results_jid(&self.config, task_id, None)
+            .await
+            .map_err(|e| classify(e, ResourceKind::Job))?;
         Ok(TaskResult { value: results })
     }
 
     /// Returns the log messages of the task.
     ///
     async fn task_logs(&mut self, task_id: &str) -> Result<String> {
-        let logs = jobs_api::get_job_logs_jid(&self.config, task_id, None).await?;
+        let logs = jobs_api::get_job_logs_jid(&self.config, task_id, None)
+            .await
+            .map_err(|e| classify(e, ResourceKind::Job))?;
         Ok(logs)
     }
 

@@ -12,9 +12,9 @@
 
 use crate::models::{Payload, ResourceType, Target, TaskResult, TaskStatus};
 use crate::QuantumResource;
+use crate::{error::QrmiError, Result};
 use anyhow::anyhow;
-use anyhow::{bail, Result};
-//use log::warn;
+// Adapted to QRMI 0.24 typed errors for the upstream sync.
 use serde_json::json;
 use std::collections::HashMap;
 use std::env;
@@ -56,9 +56,7 @@ impl MaestroLocal {
                 .map_err(|_| anyhow!("Invalid session ID: {}", si))?;
             Ok(session_id)
         } else if self.session_id.is_none() {
-            Err(anyhow!(
-                "Session ID not set. Please acquire a session first."
-            ))
+            Err(anyhow!("Session ID not set. Please acquire a session first.").into())
         } else {
             Ok(self.session_id.unwrap())
         }
@@ -82,9 +80,13 @@ impl QuantumResource for MaestroLocal {
             maestro_local_api::maestro_lib::Response::OK(true) => Ok(true),
             maestro_local_api::maestro_lib::Response::OK(false) => Ok(false),
             maestro_local_api::maestro_lib::Response::ERROR(e) => {
-                Err(anyhow!("Error pinging Maestro Local: {}", e))
+                Err(anyhow!("Error pinging Maestro Local: {}", e).into())
             }
-            _ => bail!("Unexpected response from Maestro Local ping"),
+            _ => {
+                return Err(QrmiError::Other(anyhow!(
+                    "Unexpected response from Maestro Local ping"
+                )))
+            }
         }
     }
 
@@ -104,7 +106,7 @@ impl QuantumResource for MaestroLocal {
             self.session_id = Some(session_id);
             Ok(session_id.to_string())
         } else {
-            Err(anyhow!("Failed to acquire a new session"))
+            Err(anyhow!("Failed to acquire a new session").into())
         }
     }
 
@@ -123,8 +125,8 @@ impl QuantumResource for MaestroLocal {
 
         match response {
             Ok(true) => Ok(()),
-            Ok(false) => Err(anyhow!("Failed to delete session")),
-            Err(e) => Err(anyhow!("Error deleting session: {}", e)),
+            Ok(false) => Err(anyhow!("Failed to delete session").into()),
+            Err(e) => Err(anyhow!("Error deleting session: {}", e).into()),
         }
     }
 
@@ -152,10 +154,13 @@ impl QuantumResource for MaestroLocal {
                     match result {
                         Ok(true) => {}
                         Ok(false) => {
-                            bail!("Failed to set task type");
+                            return Err(QrmiError::Other(anyhow!("Failed to set task type")));
                         }
                         Err(e) => {
-                            bail!("Error setting task type: {}", e);
+                            return Err(QrmiError::Other(anyhow!(
+                                "Error setting task type: {}",
+                                e
+                            )));
                         }
                     };
                 } else if job_type == "ESTIMATE" || job_type == "estimate" || job_type == "Estimate"
@@ -164,59 +169,75 @@ impl QuantumResource for MaestroLocal {
                     match result {
                         Ok(true) => {}
                         Ok(false) => {
-                            bail!("Failed to set task type");
+                            return Err(QrmiError::Other(anyhow!("Failed to set task type")));
                         }
                         Err(e) => {
-                            bail!("Error setting task type: {}", e);
+                            return Err(QrmiError::Other(anyhow!(
+                                "Error setting task type: {}",
+                                e
+                            )));
                         }
                     };
 
                     if observables.is_empty() {
-                        bail!("Observables must be provided for ESTIMATE job type");
+                        return Err(QrmiError::InvalidInput(
+                            "Observables must be provided for ESTIMATE job type".into(),
+                        ));
                     } else {
                         let result = task.set_observables_as_string(observables).await;
                         match result {
                             Ok(true) => {}
                             Ok(false) => {
-                                bail!("Failed to set observables");
+                                return Err(QrmiError::Other(anyhow!("Failed to set observables")));
                             }
                             Err(e) => {
-                                bail!("Error setting observables: {}", e);
+                                return Err(QrmiError::Other(anyhow!(
+                                    "Error setting observables: {}",
+                                    e
+                                )));
                             }
                         };
                     }
                 } else {
-                    bail!("Invalid job_type: {}", job_type);
+                    return Err(QrmiError::InvalidInput(format!(
+                        "Invalid job_type: {job_type}"
+                    )));
                 }
 
                 let result = task.set_qubits(qubits).await;
                 match result {
                     Ok(true) => {}
                     Ok(false) => {
-                        bail!("Failed to set qubits");
+                        return Err(QrmiError::Other(anyhow!("Failed to set qubits")));
                     }
                     Err(e) => {
-                        bail!("Error setting qubits: {}", e);
+                        return Err(QrmiError::Other(anyhow!("Error setting qubits: {}", e)));
                     }
                 };
                 let result = task.set_simulator_type(simulator_type).await;
                 match result {
                     Ok(true) => {}
                     Ok(false) => {
-                        bail!("Failed to set simulator type");
+                        return Err(QrmiError::Other(anyhow!("Failed to set simulator type")));
                     }
                     Err(e) => {
-                        bail!("Error setting simulator type: {}", e);
+                        return Err(QrmiError::Other(anyhow!(
+                            "Error setting simulator type: {}",
+                            e
+                        )));
                     }
                 };
                 let result = task.set_simulation_method(simulation_method).await;
                 match result {
                     Ok(true) => {}
                     Ok(false) => {
-                        bail!("Failed to set simulation method");
+                        return Err(QrmiError::Other(anyhow!("Failed to set simulation method")));
                     }
                     Err(e) => {
-                        bail!("Error setting simulation method: {}", e);
+                        return Err(QrmiError::Other(anyhow!(
+                            "Error setting simulation method: {}",
+                            e
+                        )));
                     }
                 };
 
@@ -224,20 +245,23 @@ impl QuantumResource for MaestroLocal {
                 match result {
                     Ok(true) => {}
                     Ok(false) => {
-                        bail!("Failed to set QASM");
+                        return Err(QrmiError::Other(anyhow!("Failed to set QASM")));
                     }
                     Err(e) => {
-                        bail!("Error setting QASM: {}", e);
+                        return Err(QrmiError::Other(anyhow!("Error setting QASM: {}", e)));
                     }
                 };
                 let result = task.set_options_json(config).await;
                 match result {
                     Ok(true) => {}
                     Ok(false) => {
-                        bail!("Failed to set options JSON");
+                        return Err(QrmiError::Other(anyhow!("Failed to set options JSON")));
                     }
                     Err(e) => {
-                        bail!("Error setting options JSON: {}", e);
+                        return Err(QrmiError::Other(anyhow!(
+                            "Error setting options JSON: {}",
+                            e
+                        )));
                     }
                 };
 
@@ -245,22 +269,19 @@ impl QuantumResource for MaestroLocal {
                 match result {
                     Ok(true) => {}
                     Ok(false) => {
-                        bail!("Failed to execute task");
+                        return Err(QrmiError::Other(anyhow!("Failed to execute task")));
                     }
                     Err(e) => {
-                        bail!("Error executing task: {}", e);
+                        return Err(QrmiError::Other(anyhow!("Error executing task: {}", e)));
                     }
                 };
 
                 Ok(task_id.to_string())
             } else {
-                Err(anyhow!(
-                    "Failed to start task, reason: {}",
-                    response.unwrap_err()
-                ))
+                Err(anyhow!("Failed to start task, reason: {}", response.unwrap_err()).into())
             }
         } else {
-            bail!(format!("Payload type is not supported. {:?}", payload))
+            return Err(QrmiError::UnsupportedPayload(format!("{payload:?}")));
         }
     }
 
@@ -295,7 +316,8 @@ impl QuantumResource for MaestroLocal {
             return Err(anyhow!(
                 "Failed to get task failed status, reason: {}",
                 response.unwrap_err()
-            ));
+            )
+            .into());
         }
 
         let response = task.finished().await;
@@ -322,21 +344,24 @@ impl QuantumResource for MaestroLocal {
                             Err(anyhow!(
                                 "Failed to get task queued status, reason: {}",
                                 response.unwrap_err()
-                            ))
+                            )
+                            .into())
                         }
                     }
                 } else {
                     Err(anyhow!(
                         "Failed to get task running status, reason: {}",
                         response.unwrap_err()
-                    ))
+                    )
+                    .into())
                 }
             }
         } else {
             Err(anyhow!(
                 "Failed to get task finished status, reason: {}",
                 response.unwrap_err()
-            ))
+            )
+            .into())
         }
     }
 
@@ -356,10 +381,14 @@ impl QuantumResource for MaestroLocal {
                 Err(anyhow!(
                     "Failed to get task result, reason: {}",
                     response.unwrap_err()
-                ))
+                )
+                .into())
             }
         } else {
-            Err(anyhow!("Task result not available, task is not completed"))
+            Err(QrmiError::TaskNotReady {
+                task_id: task_id.to_string(),
+                reason: "Task is not completed".into(),
+            })
         }
     }
 

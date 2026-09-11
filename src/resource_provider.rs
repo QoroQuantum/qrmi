@@ -13,8 +13,7 @@
 //! Trait for vendor-level quantum resource providers.
 
 use crate::models::ResourceType;
-use crate::QuantumResource;
-use anyhow::{anyhow, Result};
+use crate::{QrmiError, QuantumResource, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -109,9 +108,11 @@ pub fn create_provider(
         ResourceType::IBMQuantumSystem => Ok(Box::new(crate::ibm::IBMQuantumSystemProvider::new(
             environment,
         )?)),
-        _ => Err(anyhow!(
-            "Unsupported resource type for dynamic resource discovery: {}",
-            resource_type.as_str()
+        ResourceType::IBMQuantumComputeService => Ok(Box::new(
+            crate::ibm::IBMQuantumComputeServiceProvider::new(environment)?,
+        )),
+        _ => Err(QrmiError::UnsupportedResourceType(
+            resource_type.as_str().to_string(),
         )),
     }
 }

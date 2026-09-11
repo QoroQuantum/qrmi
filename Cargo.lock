@@ -17,8 +17,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "dotenvy",
  "felis-generated",
+ "mockito",
  "reqwest",
  "serde",
  "serde_json",
@@ -927,12 +927,6 @@ name = "dotenv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
-
-[[package]]
-name = "dotenvy"
-version = "0.15.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dunce"
@@ -2587,20 +2581,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "qiskit_runtime_client"
-version = "0.31.10"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "serde_repr",
- "serde_with",
- "url",
-]
-
-[[package]]
 name = "qrmi"
-version = "0.21.1"
+version = "0.24.4"
 dependencies = [
  "alice-bob-felis",
  "anyhow",
@@ -2613,6 +2595,7 @@ dependencies = [
  "ffi_helpers",
  "futures",
  "glob",
+ "http 1.4.0",
  "iqm-server-api",
  "libc",
  "log",
@@ -2621,20 +2604,21 @@ dependencies = [
  "pasqal-local-api",
  "pyo3",
  "pyo3-stub-gen",
- "qiskit_runtime_client",
  "quantum-system-api",
+ "quantum_compute_client",
  "reqwest-retry",
  "serde",
  "serde_json",
  "signal-hook",
  "signal-hook-tokio",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "quantum-system-api"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "assert-json-diff",
@@ -2655,6 +2639,7 @@ dependencies = [
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
+ "retry-policies",
  "rhexdump",
  "serde",
  "serde_json",
@@ -2662,6 +2647,18 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "quantum_compute_client"
+version = "0.31.10"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "url",
 ]
 
 [[package]]

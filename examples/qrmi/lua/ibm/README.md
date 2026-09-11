@@ -1,4 +1,4 @@
-# Qiskit Runtime Service QRMI - Examples in Lua
+# Quantum Compute Service QRMI - Examples in Lua
 
 ## Prerequisites
 
@@ -24,14 +24,14 @@ Because QRMI is an environment variable driven software library, all configurati
 
 | Environment variables | Descriptions |
 | ---- | ---- |
-| {resource_name}_QRMI_IBM_QRS_ENDPOINT | Qiskit Runtime Service endpoint URL(e.g. `https://quantum.cloud.ibm.com/api`) |
-| {resource_name}_QRMI_IBM_QRS_IAM_ENDPOINT | IBM Cloud IAM endpoint URL(e.g. `https://iam.cloud.ibm.com`) |
-| {resource_name}_QRMI_IBM_QRS_IAM_APIKEY | IBM Cloud IAM API Key |
-| {resource_name}_QRMI_IBM_QRS_SERVICE_CRN | Cloud Resource Name(CRN) of the provisioned Qiskit Runtime Service instance, starting with `crn:v1:`. |
-| {resource_name}_QRMI_IBM_QRS_SESSION_MODE | Execution mode to run the session in, `default='dedicated'`, `batch` or `dedicated`. |
-| {resource_name}_QRMI_IBM_QRS_SESSION_MAX_TTL | The maximum time (in seconds) for the session to run, subject to plan limits, default: `28800`. |
-| {resource_name}_QRMI_IBM_QRS_TIMEOUT_SECONDS | (Optional) Cost of the job as the estimated time it should take to complete (in seconds). Should not exceed the cost of the program, default: `None`. |
-| {resource_name}_QRMI_IBM_QRS_SESSION_ID | (Optional) Session ID, can be obtanied by acquire function. If exists, used in the target functions. |
+| {resource_name}_QRMI_IBM_QCS_ENDPOINT | Quantum Compute Service endpoint URL(e.g. `https://quantum.cloud.ibm.com/api`) |
+| {resource_name}_QRMI_IBM_QCS_IAM_ENDPOINT | IBM Cloud IAM endpoint URL(e.g. `https://iam.cloud.ibm.com`) |
+| {resource_name}_QRMI_IBM_QCS_IAM_APIKEY | IBM Cloud IAM API Key |
+| {resource_name}_QRMI_IBM_QCS_SERVICE_CRN | Cloud Resource Name(CRN) of the provisioned Quantum Compute Service instance, starting with `crn:v1:`. |
+| {resource_name}_QRMI_IBM_QCS_SESSION_MODE | Execution mode to run the session in, `default='dedicated'`, `batch` or `dedicated`. |
+| {resource_name}_QRMI_IBM_QCS_SESSION_MAX_TTL | The maximum time (in seconds) for the session to run, subject to plan limits, default: `28800`. |
+| {resource_name}_QRMI_IBM_QCS_TIMEOUT_SECONDS | (Optional) Cost of the job as the estimated time it should take to complete (in seconds). Should not exceed the cost of the program, default: `None`. |
+| {resource_name}_QRMI_IBM_QCS_SESSION_ID | (Optional) Session ID, can be obtanied by acquire function. If exists, used in the target functions. |
 
 ## Create Qiskit Primitive input file as input
 
@@ -55,10 +55,10 @@ lua example.lua <backend_name> <resource_type> <program type> <input filename>
 ```
 For example,
 ```shell-session
-export ibm_torino_QRMI_IBM_QRS_ENDPOINT=https://quantum.cloud.ibm.com/api/v1
-export ibm_torino_QRMI_IBM_QRS_IAM_ENDPOINT=https://iam.cloud.ibm.com
-export ibm_torino_QRMI_IBM_QRS_IAM_APIKEY=your_apikey
-export ibm_torino_QRMI_IBM_QRS_SERVICE_CRN=your_instance
+export ibm_torino_QRMI_IBM_QCS_ENDPOINT=https://quantum.cloud.ibm.com/api/v1
+export ibm_torino_QRMI_IBM_QCS_IAM_ENDPOINT=https://iam.cloud.ibm.com
+export ibm_torino_QRMI_IBM_QCS_IAM_APIKEY=your_apikey
+export ibm_torino_QRMI_IBM_QCS_SERVICE_CRN=your_instance
 
-lua example.lua ibm_torino qiskit-runtime-service sampler ../../examples/task_runner/qiskit/sampler_input_ibm_torino_params_only.json
+lua example.lua ibm_torino ibm-quantum-compute-service sampler ../../examples/task_runner/qiskit/sampler_input_ibm_torino_params_only.json
 ```

@@ -1,6 +1,7 @@
 // This code is part of Qiskit.
 //
 // (C) Copyright IBM 2025-2026
+// (C) Copyright UKRI-STFC (Hartree Centre) 2026
 //
 // This program and the accompanying materials are made available under the
 // terms of the GNU General Public License version 3, as published by the
@@ -29,8 +30,10 @@ use std::io::BufReader;
 pub enum ResourceType {
     /// IBM Quantum System
     IBMQuantumSystem,
-    /// Qiskit Runtime Service
+    /// Qiskit Runtime Service(deprecated)
     QiskitRuntimeService,
+    /// IBM Quantum Compute Service
+    IBMQuantumComputeService,
     /// Pasqal Cloud
     PasqalCloud,
     // Pasqal Local
@@ -48,27 +51,21 @@ impl<'de> serde::Deserialize<'de> for ResourceType {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "ibm-quantum-system" => Ok(ResourceType::IBMQuantumSystem),
-            "qiskit-runtime-service" => Ok(ResourceType::QiskitRuntimeService),
-            "pasqal-cloud" => Ok(ResourceType::PasqalCloud),
-            "pasqal-local" => Ok(ResourceType::PasqalLocal),
-            "alice-bob-felis" => Ok(ResourceType::AliceBobFelis),
-            "iqm-server" => Ok(ResourceType::IQMServer),
-            "maestro-local" => Ok(ResourceType::MaestroLocal),
-            _ => Err(serde::de::Error::unknown_variant(
+        ResourceType::from_qpu_type_str(&s).ok_or_else(|| {
+            serde::de::Error::unknown_variant(
                 &s,
                 &[
                     "ibm-quantum-system",
                     "qiskit-runtime-service",
+                    "ibm-quantum-compute-service",
                     "pasqal-cloud",
                     "pasqal-local",
                     "alice-bob-felis",
                     "iqm-server",
                     "maestro-local",
                 ],
-            )),
-        }
+            )
+        })
     }
 }
 impl ResourceType {
@@ -76,11 +73,33 @@ impl ResourceType {
         match self {
             ResourceType::IBMQuantumSystem => "ibm-quantum-system",
             ResourceType::QiskitRuntimeService => "qiskit-runtime-service",
+            ResourceType::IBMQuantumComputeService => "ibm-quantum-compute-service",
             ResourceType::PasqalCloud => "pasqal-cloud",
             ResourceType::PasqalLocal => "pasqal-local",
             ResourceType::AliceBobFelis => "alice-bob-felis",
             ResourceType::IQMServer => "iqm-server",
             ResourceType::MaestroLocal => "maestro-local",
+        }
+    }
+
+    /// Parses one of QRMI's `qpu_type` strings (e.g. as used in the
+    /// `QRMI_JOB_QPU_TYPES` environment variable, or the `"type"` field of a
+    /// `qrmi_config.json` resource definition) into a `ResourceType`.
+    ///
+    /// Returns `None` for an unrecognized string, rather than an error,
+    /// since callers iterating over a job's QPU list generally want to warn
+    /// and skip an unsupported entry rather than abort the whole scan.
+    pub fn from_qpu_type_str(s: &str) -> Option<Self> {
+        match s {
+            "ibm-quantum-system" => Some(ResourceType::IBMQuantumSystem),
+            "qiskit-runtime-service" => Some(ResourceType::QiskitRuntimeService),
+            "ibm-quantum-compute-service" => Some(ResourceType::IBMQuantumComputeService),
+            "pasqal-cloud" => Some(ResourceType::PasqalCloud),
+            "pasqal-local" => Some(ResourceType::PasqalLocal),
+            "alice-bob-felis" => Some(ResourceType::AliceBobFelis),
+            "iqm-server" => Some(ResourceType::IQMServer),
+            "maestro-local" => Some(ResourceType::MaestroLocal),
+            _ => None,
         }
     }
 }

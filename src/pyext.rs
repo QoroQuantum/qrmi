@@ -1,6 +1,7 @@
 // This code is part of Qiskit.
 //
 // (C) Copyright IBM, Pasqal 2025, 2026
+// (C) Copyright UKRI-STFC (Hartree Centre) 2026
 //
 // This code is licensed under the Apache License, Version 2.0. You may
 // obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -10,19 +11,112 @@
 // copyright notice, and modified files need to carry a notice indicating
 // that they have been altered from the originals.
 
-use crate::alice_bob::AliceBobFelis;
+use crate::error::{QrmiError, QrmiErrorKind};
 use crate::ibm::IBMQiskitRuntimeServiceProvider;
+use crate::ibm::IBMQuantumComputeServiceProvider;
 use crate::ibm::IBMQuantumSystemProvider;
-use crate::ibm::{IBMQiskitRuntimeService, IBMQuantumSystem};
-use crate::iqm::IQMServer;
-use crate::maestro::MaestroLocal;
 use crate::models::{Payload, ResourceDef, Target, TaskResult, TaskStatus};
-use crate::pasqal::PasqalCloud;
-use crate::pasqal::PasqalLocal;
 use crate::QuantumResource;
 use pyo3::prelude::*;
-use pyo3_stub_gen::{define_stub_info_gatherer, derive::*};
+use pyo3_stub_gen::{create_exception, define_stub_info_gatherer, derive::*};
 use tokio::runtime::Runtime;
+
+create_exception!(
+    qrmi._core,
+    QrmiError_,
+    pyo3::exceptions::PyRuntimeError,
+    "Base class for all QRMI-specific errors. Catching this catches any \
+     error QRMI itself raises (as opposed to errors surfaced verbatim from \
+     an underlying vendor library)."
+);
+create_exception!(
+    qrmi._core,
+    EnvVarNotSetError,
+    QrmiError_,
+    "A required environment variable was not set."
+);
+create_exception!(
+    qrmi._core,
+    ConfigError,
+    QrmiError_,
+    "A configuration value was missing, could not be parsed, or was \
+     otherwise invalid (covers `QrmiError::ParseError`, \
+     `QrmiError::MissingConfigKey`, and `QrmiError::InvalidConfig`)."
+);
+create_exception!(
+    qrmi._core,
+    UnsupportedResourceTypeError,
+    QrmiError_,
+    "Dynamic discovery was requested for an unsupported resource type."
+);
+create_exception!(
+    qrmi._core,
+    UnsupportedPayloadError,
+    QrmiError_,
+    "The payload (or a value within it, such as a program ID) is not \
+     supported by this backend."
+);
+create_exception!(
+    qrmi._core,
+    UnsupportedFunctionError,
+    QrmiError_,
+    "The requested operation is not supported by this resource."
+);
+create_exception!(
+    qrmi._core,
+    TaskNotReadyError,
+    QrmiError_,
+    "The task is not in a state that allows the requested operation \
+     (e.g. its result was requested while it is still running)."
+);
+create_exception!(
+    qrmi._core,
+    InvalidInputError,
+    QrmiError_,
+    "A value QRMI was given was invalid, whether QRMI itself rejected it \\
+     locally (e.g. a malformed `filters` string, JSON, or UTF-8) or a \\
+     vendor's API rejected the resulting request after receiving it."
+);
+create_exception!(
+    qrmi._core,
+    ResourceNotFoundError,
+    QrmiError_,
+    "The named resource (e.g. a backend) does not exist."
+);
+create_exception!(
+    qrmi._core,
+    TaskNotFoundError,
+    QrmiError_,
+    "The named task (e.g. a job) does not exist, or has already been removed."
+);
+create_exception!(
+    qrmi._core,
+    AuthenticationFailedError,
+    QrmiError_,
+    "The request's credentials were missing or rejected by the vendor's API."
+);
+
+/// Converts a [`QrmiError`] into the [`PyErr`] subclass matching its kind,
+/// so Python code can `except qrmi.TaskNotReadyError` instead of parsing
+/// `RuntimeError` message text. See `QrmiError::kind` for the mapping.
+fn to_py_err(err: QrmiError) -> PyErr {
+    let msg = err.to_string();
+    match err.kind() {
+        QrmiErrorKind::EnvVarNotSet => EnvVarNotSetError::new_err(msg),
+        QrmiErrorKind::ParseError
+        | QrmiErrorKind::MissingConfigKey
+        | QrmiErrorKind::InvalidConfig => ConfigError::new_err(msg),
+        QrmiErrorKind::UnsupportedResourceType => UnsupportedResourceTypeError::new_err(msg),
+        QrmiErrorKind::UnsupportedPayload => UnsupportedPayloadError::new_err(msg),
+        QrmiErrorKind::UnsupportedFunction => UnsupportedFunctionError::new_err(msg),
+        QrmiErrorKind::TaskNotReady => TaskNotReadyError::new_err(msg),
+        QrmiErrorKind::InvalidInput => InvalidInputError::new_err(msg),
+        QrmiErrorKind::ResourceNotFound => ResourceNotFoundError::new_err(msg),
+        QrmiErrorKind::TaskNotFound => TaskNotFoundError::new_err(msg),
+        QrmiErrorKind::AuthenticationFailed => AuthenticationFailedError::new_err(msg),
+        QrmiErrorKind::Other => QrmiError_::new_err(msg),
+    }
+}
 
 #[pyclass(eq, eq_int, hash, frozen, from_py_object)]
 #[gen_stub_pyclass_enum]
@@ -30,11 +124,30 @@ use tokio::runtime::Runtime;
 pub enum ResourceType {
     IBMQuantumSystem,
     IBMQiskitRuntimeService,
+    IBMQuantumComputeService,
     PasqalCloud,
     PasqalLocal,
     AliceBobFelis,
     IQMServer,
     MaestroLocal,
+}
+impl From<ResourceType> for crate::models::ResourceType {
+    fn from(value: ResourceType) -> Self {
+        match value {
+            ResourceType::IBMQuantumSystem => crate::models::ResourceType::IBMQuantumSystem,
+            ResourceType::IBMQiskitRuntimeService => {
+                crate::models::ResourceType::QiskitRuntimeService
+            }
+            ResourceType::IBMQuantumComputeService => {
+                crate::models::ResourceType::IBMQuantumComputeService
+            }
+            ResourceType::PasqalCloud => crate::models::ResourceType::PasqalCloud,
+            ResourceType::PasqalLocal => crate::models::ResourceType::PasqalLocal,
+            ResourceType::AliceBobFelis => crate::models::ResourceType::AliceBobFelis,
+            ResourceType::IQMServer => crate::models::ResourceType::IQMServer,
+            ResourceType::MaestroLocal => crate::models::ResourceType::MaestroLocal,
+        }
+    }
 }
 
 #[gen_stub_pyclass]
@@ -42,7 +155,31 @@ pub enum ResourceType {
 #[pyo3(name = "QuantumResource")]
 pub struct PyQuantumResource {
     qrmi: Box<dyn QuantumResource + Send + Sync>,
-    rt: Runtime,
+    // `ManuallyDrop`, not a plain `Runtime`, so `Drop` below can take
+    // ownership and call `shutdown_background()` instead of letting the
+    // field's own destructor run. Existing `self.rt.block_on(...)` call
+    // sites are unaffected: `ManuallyDrop<T>` derefs to `T` transparently.
+    rt: std::mem::ManuallyDrop<Runtime>,
+}
+
+impl Drop for PyQuantumResource {
+    fn drop(&mut self) {
+        // `Runtime`'s own `Drop` blocks the current thread indefinitely
+        // until every spawned task finishes. That is a problem here
+        // specifically: Python drops objects while holding the GIL, and
+        // if a worker thread needs the GIL to log something (e.g. an
+        // in-flight HTTP request logged at `RUST_LOG=trace`) before it can
+        // finish, that worker waits for the GIL forever while this thread
+        // waits for that worker forever. `shutdown_background()` discards
+        // the runtime without waiting for anything, which avoids the
+        // deadlock entirely (in exchange for not waiting for in-flight
+        // background work to finish cleanly on drop).
+        //
+        // SAFETY: `self.rt` is only ever taken here, in `Drop::drop`,
+        // which runs at most once per instance.
+        let rt = unsafe { std::mem::ManuallyDrop::take(&mut self.rt) };
+        rt.shutdown_background();
+    }
 }
 
 impl PyQuantumResource {
@@ -50,7 +187,9 @@ impl PyQuantumResource {
     pub(crate) fn from_inner(qrmi: Box<dyn QuantumResource + Send + Sync>) -> Self {
         Self {
             qrmi,
-            rt: Runtime::new().unwrap(),
+            rt: std::mem::ManuallyDrop::new(
+                Runtime::new().expect("Failed to create a new tokio runtime."),
+            ),
         }
     }
 }
@@ -61,85 +200,46 @@ impl PyQuantumResource {
     #[new]
     pub fn new(resource_id: &str, resource_type: ResourceType) -> PyResult<Self> {
         crate::common::initialize();
-        let qrmi: Box<dyn QuantumResource + Send + Sync> = match resource_type {
-            ResourceType::IBMQuantumSystem => match IBMQuantumSystem::new(resource_id) {
-                Ok(v) => Box::new(v),
-                Err(e) => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
-                }
-            },
-            ResourceType::IBMQiskitRuntimeService => {
-                match IBMQiskitRuntimeService::new(resource_id) {
-                    Ok(v) => Box::new(v),
-                    Err(e) => {
-                        return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
-                    }
-                }
-            }
-            ResourceType::PasqalCloud => match PasqalCloud::new(resource_id) {
-                Ok(v) => Box::new(v),
-                Err(e) => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
-                }
-            },
-            ResourceType::PasqalLocal => match PasqalLocal::new(resource_id) {
-                Ok(v) => Box::new(v),
-                Err(e) => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
-                }
-            },
-            ResourceType::AliceBobFelis => match AliceBobFelis::new(resource_id) {
-                Ok(v) => Box::new(v),
-                Err(e) => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
-                }
-            },
-            ResourceType::IQMServer => match IQMServer::new(resource_id) {
-                Ok(v) => Box::new(v),
-                Err(e) => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
-                }
-            },
-            ResourceType::MaestroLocal => match MaestroLocal::new(resource_id) {
-                Ok(v) => Box::new(v),
-                Err(e) => {
-                    return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string()));
-                }
-            },
-        };
+        let qrmi = crate::common::create_resource(&resource_type.into(), resource_id)
+            .map_err(to_py_err)?;
 
         Ok(Self {
             qrmi,
-            rt: Runtime::new().unwrap(),
+            rt: std::mem::ManuallyDrop::new(
+                Runtime::new().expect("Failed to create a new tokio runtime."),
+            ),
         })
     }
 
-    fn is_accessible(&mut self) -> PyResult<bool> {
+    fn is_accessible(&mut self, py: Python<'_>) -> PyResult<bool> {
         crate::common::initialize();
-        let result = self.rt.block_on(async { self.qrmi.is_accessible().await });
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.is_accessible().await }));
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn resource_id(&mut self) -> PyResult<String> {
+    fn resource_id(&mut self, py: Python<'_>) -> PyResult<String> {
         crate::common::initialize();
-        let result = self.rt.block_on(async { self.qrmi.resource_id().await });
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.resource_id().await }));
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn resource_type(&mut self) -> PyResult<ResourceType> {
+    fn resource_type(&mut self, py: Python<'_>) -> PyResult<ResourceType> {
         crate::common::initialize();
-        let result = self.rt.block_on(async { self.qrmi.resource_type().await });
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.resource_type().await }));
         match result {
             Ok(v) => Ok(match v {
                 crate::models::ResourceType::IBMQuantumSystem => ResourceType::IBMQuantumSystem,
                 crate::models::ResourceType::QiskitRuntimeService => {
                     ResourceType::IBMQiskitRuntimeService
+                }
+                crate::models::ResourceType::IBMQuantumComputeService => {
+                    ResourceType::IBMQuantumComputeService
                 }
                 crate::models::ResourceType::PasqalCloud => ResourceType::PasqalCloud,
                 crate::models::ResourceType::PasqalLocal => ResourceType::PasqalLocal,
@@ -147,95 +247,100 @@ impl PyQuantumResource {
                 crate::models::ResourceType::IQMServer => ResourceType::IQMServer,
                 crate::models::ResourceType::MaestroLocal => ResourceType::MaestroLocal,
             }),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn acquire(&mut self) -> PyResult<String> {
+    fn acquire(&mut self, py: Python<'_>) -> PyResult<String> {
         crate::common::initialize();
-        let result = self.rt.block_on(async { self.qrmi.acquire().await });
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.acquire().await }));
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn release(&mut self, id: &str) -> PyResult<()> {
+    fn release(&mut self, py: Python<'_>, id: &str) -> PyResult<()> {
         crate::common::initialize();
-        let result = self.rt.block_on(async { self.qrmi.release(id).await });
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.release(id).await }));
         match result {
             Ok(()) => Ok(()),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn task_start(&mut self, payload: Payload) -> PyResult<String> {
+    fn task_start(&mut self, py: Python<'_>, payload: Payload) -> PyResult<String> {
         crate::common::initialize();
-        let result = self
-            .rt
-            .block_on(async { self.qrmi.task_start(payload).await });
+        let result = py.detach(|| {
+            self.rt
+                .block_on(async { self.qrmi.task_start(payload).await })
+        });
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn task_stop(&mut self, task_id: &str) -> PyResult<()> {
+    fn task_stop(&mut self, py: Python<'_>, task_id: &str) -> PyResult<()> {
         crate::common::initialize();
-        let result = self
-            .rt
-            .block_on(async { self.qrmi.task_stop(task_id).await });
+        let result = py.detach(|| {
+            self.rt
+                .block_on(async { self.qrmi.task_stop(task_id).await })
+        });
         match result {
             Ok(()) => Ok(()),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn task_status(&mut self, task_id: &str) -> PyResult<TaskStatus> {
+    fn task_status(&mut self, py: Python<'_>, task_id: &str) -> PyResult<TaskStatus> {
         crate::common::initialize();
-        let result = self
-            .rt
-            .block_on(async { self.qrmi.task_status(task_id).await });
+        let result = py.detach(|| {
+            self.rt
+                .block_on(async { self.qrmi.task_status(task_id).await })
+        });
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn task_result(&mut self, task_id: &str) -> PyResult<TaskResult> {
+    fn task_result(&mut self, py: Python<'_>, task_id: &str) -> PyResult<TaskResult> {
         crate::common::initialize();
-        let result = self
-            .rt
-            .block_on(async { self.qrmi.task_result(task_id).await });
+        let result = py.detach(|| {
+            self.rt
+                .block_on(async { self.qrmi.task_result(task_id).await })
+        });
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn task_logs(&mut self, task_id: &str) -> PyResult<String> {
+    fn task_logs(&mut self, py: Python<'_>, task_id: &str) -> PyResult<String> {
         crate::common::initialize();
-        let result = self
-            .rt
-            .block_on(async { self.qrmi.task_logs(task_id).await });
+        let result = py.detach(|| {
+            self.rt
+                .block_on(async { self.qrmi.task_logs(task_id).await })
+        });
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn target(&mut self) -> PyResult<Target> {
+    fn target(&mut self, py: Python<'_>) -> PyResult<Target> {
         crate::common::initialize();
-        let result = self.rt.block_on(async { self.qrmi.target().await });
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.target().await }));
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
-    fn metadata(&mut self) -> PyResult<std::collections::HashMap<String, String>> {
+    fn metadata(&mut self, py: Python<'_>) -> PyResult<std::collections::HashMap<String, String>> {
         crate::common::initialize();
-        let result = self.rt.block_on(async { self.qrmi.metadata().await });
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.metadata().await }));
         Ok(result)
     }
 }
@@ -269,6 +374,9 @@ impl PyResourceDef {
             crate::models::ResourceType::IBMQuantumSystem => ResourceType::IBMQuantumSystem,
             crate::models::ResourceType::QiskitRuntimeService => {
                 ResourceType::IBMQiskitRuntimeService
+            }
+            crate::models::ResourceType::IBMQuantumComputeService => {
+                ResourceType::IBMQuantumComputeService
             }
             crate::models::ResourceType::PasqalCloud => ResourceType::PasqalCloud,
             crate::models::ResourceType::PasqalLocal => ResourceType::PasqalLocal,
@@ -305,7 +413,7 @@ impl PyResourceDef {
 /// config = Config.load("/path/to/qrmi_config.json")
 /// resource_def = config.resource_map["ibm_inst1"]
 ///
-/// provider = ResourceProvider(ResourceType.IBMQiskitRuntimeService, resource_def.environment)
+/// provider = ResourceProvider(ResourceType.IBMQuantumComputeService, resource_def.environment)
 /// resources = provider.resources()
 /// resources = provider.resources("num_qubits=127&name=ibm_*&status=online")
 /// resource  = provider.least_busy()
@@ -318,7 +426,20 @@ impl PyResourceDef {
 #[pyo3(name = "ResourceProvider")]
 pub struct PyResourceProvider {
     inner: Box<dyn crate::ResourceProvider>,
-    rt: Runtime,
+    // See `PyQuantumResource`'s `rt` field and `Drop` impl for why this is
+    // `ManuallyDrop` rather than a plain `Runtime`.
+    rt: std::mem::ManuallyDrop<Runtime>,
+}
+
+impl Drop for PyResourceProvider {
+    fn drop(&mut self) {
+        // See `PyQuantumResource`'s `Drop` impl for why.
+        //
+        // SAFETY: `self.rt` is only ever taken here, in `Drop::drop`,
+        // which runs at most once per instance.
+        let rt = unsafe { std::mem::ManuallyDrop::take(&mut self.rt) };
+        rt.shutdown_background();
+    }
 }
 
 #[gen_stub_pymethods]
@@ -327,7 +448,8 @@ impl PyResourceProvider {
     /// Constructs a new provider from a resource type and environment variable map.
     ///
     /// Currently supported resource types:
-    /// - `ResourceType.IBMQiskitRuntimeService`
+    /// - `ResourceType.IBMQiskitRuntimeService`(deprecated)
+    /// - `ResourceType.IBMQuantumComputeService`
     /// - `ResourceType.IBMQuantumSystem`
     #[new]
     pub fn new(
@@ -339,22 +461,30 @@ impl PyResourceProvider {
             ResourceType::IBMQiskitRuntimeService => {
                 match IBMQiskitRuntimeServiceProvider::new(&environment) {
                     Ok(p) => Box::new(p),
-                    Err(e) => return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+                    Err(e) => return Err(to_py_err(e)),
+                }
+            }
+            ResourceType::IBMQuantumComputeService => {
+                match IBMQuantumComputeServiceProvider::new(&environment) {
+                    Ok(p) => Box::new(p),
+                    Err(e) => return Err(to_py_err(e)),
                 }
             }
             ResourceType::IBMQuantumSystem => match IBMQuantumSystemProvider::new(&environment) {
                 Ok(p) => Box::new(p),
-                Err(e) => return Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+                Err(e) => return Err(to_py_err(e)),
             },
             _ => {
-                return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                    "Unsupported resource type for dynamic resource discovery",
-                ))
+                return Err(to_py_err(QrmiError::UnsupportedResourceType(format!(
+                    "{resource_type:?}"
+                ))))
             }
         };
         Ok(Self {
             inner,
-            rt: Runtime::new().unwrap(),
+            rt: std::mem::ManuallyDrop::new(
+                Runtime::new().expect("Failed to create a new tokio runtime."),
+            ),
         })
     }
 
@@ -374,17 +504,22 @@ impl PyResourceProvider {
     /// resources = provider.resources("num_qubits=127&name=ibm_*")
     /// ```
     #[pyo3(signature = (filters=None))]
-    pub fn resources(&self, filters: Option<&str>) -> PyResult<Vec<PyQuantumResource>> {
+    pub fn resources(
+        &self,
+        py: Python<'_>,
+        filters: Option<&str>,
+    ) -> PyResult<Vec<PyQuantumResource>> {
         crate::common::initialize();
-        let result = self
-            .rt
-            .block_on(async { self.inner.resources(filters.map(str::to_string)).await });
+        let result = py.detach(|| {
+            self.rt
+                .block_on(async { self.inner.resources(filters.map(str::to_string)).await })
+        });
         match result {
             Ok(resources) => Ok(resources
                 .into_iter()
                 .map(PyQuantumResource::from_inner)
                 .collect()),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
     }
 
@@ -399,15 +534,120 @@ impl PyResourceProvider {
     /// resource = provider.least_busy("num_qubits=127&status=online")
     /// ```
     #[pyo3(signature = (filters=None))]
-    pub fn least_busy(&self, filters: Option<&str>) -> PyResult<Option<PyQuantumResource>> {
+    pub fn least_busy(
+        &self,
+        py: Python<'_>,
+        filters: Option<&str>,
+    ) -> PyResult<Option<PyQuantumResource>> {
         crate::common::initialize();
-        let result = self
-            .rt
-            .block_on(async { self.inner.least_busy(filters.map(str::to_string)).await });
+        let result = py.detach(|| {
+            self.rt
+                .block_on(async { self.inner.least_busy(filters.map(str::to_string)).await })
+        });
         match result {
             Ok(resource) => Ok(resource.map(PyQuantumResource::from_inner)),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+            Err(e) => Err(to_py_err(e)),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QRMIService Python bindings
+// ---------------------------------------------------------------------------
+
+/// Python wrapper for `QRMIService`.
+///
+/// Discovers the QPU resources assigned to the current job -- read from the
+/// `QRMI_JOB_QPU_RESOURCES` / `QRMI_JOB_QPU_TYPES` environment variables, or
+/// their legacy `SLURM_JOB_QPU_RESOURCES` / `SLURM_JOB_QPU_TYPES`
+/// equivalents -- and exposes the ones that are currently accessible as
+/// `QuantumResource` instances.
+///
+/// This is a thin wrapper around the plain-Rust [`crate::QRMIService`],
+/// which does the actual discovery/filtering and is usable on its own from
+/// Rust (see its docs for a Rust example). This wrapper's job is only to
+/// bridge that to Python: it drives `QRMIService::new()`'s `Future` to
+/// completion on a private tokio `Runtime` (mirroring `PyResourceProvider`
+/// and `PyQuantumResource` elsewhere in this module, since `pyo3` classes
+/// can't themselves be `async`), then moves each resource returned by
+/// `QRMIService::into_resource_map()` into its own, independently owned
+/// `PyQuantumResource` -- exactly as `PyResourceProvider::resources()` does
+/// for each `Box<dyn QuantumResource>` returned by
+/// `ResourceProvider::resources()`.
+///
+/// # Example (Python)
+///
+/// ```python
+/// from qrmi import QRMIService
+///
+/// service = QRMIService()
+/// for resource in service.resources():
+///     print(resource.resource_id())
+///
+/// resource = service.resource("ibm_torino")
+/// ```
+#[gen_stub_pyclass]
+#[pyclass]
+#[pyo3(name = "QRMIService")]
+pub struct PyQRMIService {
+    // Keyed by resource id (i.e. QPU name). Stored as `Py<PyQuantumResource>`
+    // rather than owning `PyQuantumResource` directly so that `resources()`
+    // and `resource()` can hand back the *same* underlying instance on every
+    // call (cheap refcount bump) instead of constructing a fresh one --
+    // `PyQuantumResource` cannot be cloned (it owns a `Box<dyn
+    // QuantumResource>` and its own tokio `Runtime`), and callers may rely
+    // on identity, e.g. having already called `acquire()` on the instance
+    // returned earlier.
+    qrmi_resources: std::collections::HashMap<String, Py<PyQuantumResource>>,
+}
+
+#[gen_stub_pymethods]
+#[pymethods]
+impl PyQRMIService {
+    #[new]
+    pub fn new(py: Python<'_>) -> PyResult<Self> {
+        crate::common::initialize();
+
+        // A short-lived runtime just to drive `QRMIService::new()` -- unlike
+        // `PyQuantumResource`/`PyResourceProvider`, no long-lived async
+        // methods are called after this, so there's no need to keep it
+        // around (or worry about its `Drop` deadlocking; see those types'
+        // `Drop` impls for why that's normally a concern here).
+        let rt = Runtime::new().expect("Failed to create a new tokio runtime.");
+        let inner = py
+            .detach(|| rt.block_on(async { crate::QRMIService::new().await }))
+            .map_err(to_py_err)?;
+
+        let qrmi_resources = inner
+            .into_resource_map()
+            .into_iter()
+            .map(|(id, boxed)| {
+                Py::new(py, PyQuantumResource::from_inner(boxed)).map(|obj| (id, obj))
+            })
+            .collect::<PyResult<std::collections::HashMap<_, _>>>()?;
+
+        Ok(Self { qrmi_resources })
+    }
+
+    /// Returns all accessible QRMI resources.
+    fn resources(&self, py: Python<'_>) -> Vec<Py<PyQuantumResource>> {
+        self.qrmi_resources
+            .values()
+            .map(|r| r.clone_ref(py))
+            .collect()
+    }
+
+    /// Returns a single resource matching the specified resource identifier.
+    ///
+    /// # Arguments
+    ///
+    /// * `resource_id` - A resource identifier, i.e. backend name for IBM Quantum.
+    ///
+    /// Returns `None` if not found.
+    fn resource(&self, py: Python<'_>, resource_id: &str) -> Option<Py<PyQuantumResource>> {
+        self.qrmi_resources
+            .get(resource_id)
+            .map(|r| r.clone_ref(py))
     }
 }
 
@@ -461,9 +701,123 @@ impl PyConfig {
     }
 }
 
+/// Bridges QRMI's `log` records into Python's `logging` module.
+///
+/// Registered once via `crate::common::set_log_sink` from the
+/// `#[pymodule]` init function below, using the same `LogSink` extension
+/// point `cext::qrmi_log_callback_set` also adapts a C callback into,
+/// rather than installing a second, separate logging backend. This avoids
+/// ever having two loggers registered in the same process (the `log`
+/// crate only allows one), which matters because `cext` is always
+/// compiled in alongside `pyext` when the `pyo3` feature is enabled.
+///
+/// The `env_logger` filter in `common::initialize` (default `RUST_LOG`
+/// level: `warn`) still runs first and decides what reaches this sink at
+/// all; what changes here is only where an accepted record goes
+/// afterwards. A record that passes that filter is forwarded to
+/// `logging.getLogger(target)`, so Python-side configuration
+/// (`logging.basicConfig()`, per-logger levels, handlers) governs it from
+/// there same as any other Python log record.
+///
+/// This is a plain Rust closure over `common::LogSink` -- no C ABI, no raw
+/// pointers, no `unsafe`. `common.rs` doesn't know or care that this
+/// particular sink happens to call into Python; that's this module's
+/// business alone. Compare `cext::qrmi_log_callback_set`, which adapts a
+/// C function pointer into the same `LogSink` shape at its own boundary.
+///
+/// Uses `Python::try_attach`, not `Python::attach`: a log record can be
+/// emitted from a `__del__` running during CPython interpreter
+/// finalization (`Py_FinalizeEx`) -- attempting to (re-)acquire the GIL
+/// in that window is a known hazard (documented on `Python::attach`
+/// itself, and the subject of e.g. PyO3#5317: repeatedly attaching during
+/// finalization has hung or segfaulted). `try_attach` returns `None`
+/// instead in that case; we simply drop the record rather than risk
+/// hanging the interpreter shutdown to deliver a log line.
+fn python_log_sink(level: log::Level, target: &str, message: &str) {
+    // Python's `logging` module level numbers (see Python's `logging`
+    // module docs / `Lib/logging/__init__.py`: CRITICAL=50, ERROR=40,
+    // WARNING=30, INFO=20, DEBUG=10, NOTSET=0). Hardcoded rather than
+    // looked up via `logging.ERROR` etc. because these values are part of
+    // `logging`'s documented, long-stable public API and are very unlikely
+    // to change.
+    // TRACE has no Python equivalent, so it is folded into DEBUG.
+    let py_level: i32 = match level {
+        log::Level::Error => 40,
+        log::Level::Warn => 30,
+        log::Level::Info => 20,
+        log::Level::Debug | log::Level::Trace => 10,
+    };
+
+    Python::try_attach(|py| {
+        let Ok(logging) = py.import("logging") else {
+            return;
+        };
+        let Ok(logger) = logging.call_method1("getLogger", (target,)) else {
+            return;
+        };
+        let _ = logger.call_method1("log", (py_level, message));
+    });
+}
+
+/// Registers a user-supplied Python callable as the destination for
+/// QRMI's `log` records, replacing whatever sink is currently active --
+/// including the default one installed at import time (see
+/// `python_log_sink` above). This is the Python-facing equivalent of the
+/// C API's `qrmi_log_callback_set`.
+///
+/// `callback` is called as `callback(level, target, message)`, all three
+/// arguments `str`. `level` is one of `"ERROR"`, `"WARN"`, `"INFO"`,
+/// `"DEBUG"`, `"TRACE"`. Pass `None` to clear it, which reverts to plain
+/// stderr output -- the same fallback the C API's `NULL` reverts to --
+/// rather than back to the built-in `logging`-forwarding sink. Once you
+/// take over logging, where it goes (including back to `logging`, if
+/// that's what you want) is entirely your callback's responsibility.
+///
+/// # Notes
+///
+/// - `callback` may run on any thread, including a tokio worker thread
+///   unrelated to whichever Python thread called into QRMI. This is safe
+///   as long as every blocking QRMI call keeps releasing the GIL for its
+///   duration (see the `py.detach(...)` calls throughout this module) --
+///   that is what lets a worker thread acquire the GIL here without
+///   deadlocking against a QRMI call that is still holding it.
+/// - `callback` runs synchronously and holds the GIL while it runs; a slow
+///   callback delays whichever QRMI call happened to trigger the log
+///   record it's handling. Keep it fast -- e.g. hand off to a queue --
+///   if you need to do anything slow with a record.
+/// - If `callback` raises, the exception is printed (as an unhandled
+///   exception would be) and otherwise discarded; it cannot propagate
+///   back into the Rust code that logged in the first place.
+/// - Like `python_log_sink`, this uses `Python::try_attach`: if a record
+///   is emitted while the interpreter is finalizing, `callback` is simply
+///   not called for it rather than risking the same hang/segfault hazard
+///   `Python::attach` has in that window.
+#[gen_stub_pyfunction]
+#[pyfunction]
+fn set_log_callback(callback: Option<Py<PyAny>>) -> PyResult<()> {
+    crate::common::initialize();
+    let sink: Option<crate::common::LogSink> = callback.map(|callback| {
+        let sink: crate::common::LogSink =
+            std::sync::Arc::new(move |level: log::Level, target: &str, message: &str| {
+                Python::try_attach(|py| {
+                    if let Err(err) = callback.call1(py, (level.as_str(), target, message)) {
+                        err.print(py);
+                    }
+                });
+            });
+        sink
+    });
+    crate::common::set_log_sink(sink)
+        .map_err(|()| pyo3::exceptions::PyRuntimeError::new_err("Failed to set log callback"))
+}
+
 /// A Python module implemented in Rust.
 #[pymodule(name = "_core")]
 fn qrmi(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    crate::common::initialize();
+    let _ = crate::common::set_log_sink(Some(std::sync::Arc::new(python_log_sink)));
+
+    m.add_function(wrap_pyfunction!(set_log_callback, m)?)?;
     m.add_class::<PyQuantumResource>()?;
     m.add_class::<ResourceType>()?;
     m.add_class::<crate::models::TaskStatus>()?;
@@ -473,6 +827,39 @@ fn qrmi(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyResourceDef>()?;
     m.add_class::<PyResourceProvider>()?;
     m.add_class::<PyConfig>()?;
+    m.add_class::<PyQRMIService>()?;
+
+    // Register the QrmiError exception hierarchy so Python code can catch
+    // them by name (e.g. `except qrmi.TaskNotReadyError`). `create_exception!`
+    // only defines the Rust-side type; it does not make it importable on its
+    // own.
+    m.add("QrmiError", m.py().get_type::<QrmiError_>())?;
+    m.add("EnvVarNotSetError", m.py().get_type::<EnvVarNotSetError>())?;
+    m.add("ConfigError", m.py().get_type::<ConfigError>())?;
+    m.add(
+        "UnsupportedResourceTypeError",
+        m.py().get_type::<UnsupportedResourceTypeError>(),
+    )?;
+    m.add(
+        "UnsupportedPayloadError",
+        m.py().get_type::<UnsupportedPayloadError>(),
+    )?;
+    m.add(
+        "UnsupportedFunctionError",
+        m.py().get_type::<UnsupportedFunctionError>(),
+    )?;
+    m.add("TaskNotReadyError", m.py().get_type::<TaskNotReadyError>())?;
+    m.add("InvalidInputError", m.py().get_type::<InvalidInputError>())?;
+    m.add(
+        "ResourceNotFoundError",
+        m.py().get_type::<ResourceNotFoundError>(),
+    )?;
+    m.add("TaskNotFoundError", m.py().get_type::<TaskNotFoundError>())?;
+    m.add(
+        "AuthenticationFailedError",
+        m.py().get_type::<AuthenticationFailedError>(),
+    )?;
+
     Ok(())
 }
 define_stub_info_gatherer!(stub_info);
