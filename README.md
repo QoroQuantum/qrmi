@@ -60,6 +60,7 @@ pip install "qrmi[ibm,pasqal]"
 
 > [!NOTE]
 > Maestro Local requires no optional extra; `pip install qrmi` is sufficient, as it connects to a locally running Maestro server over a Unix domain socket. The [Maestro Local examples](https://github.com/qiskit-community/qrmi/blob/main/examples/qiskit_primitives/maestro_local) additionally require `qiskit` to build circuits.
+> See the [Maestro migration notes](docs/migration/maestro-0.24.md) for service discovery, session/error behavior, and rebuilding bindings after an upstream merge.
 
 Pip will handle all dependencies automatically and you will always install the latest (and well-tested) version.
 

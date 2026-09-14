@@ -249,9 +249,10 @@ task_runner ab_emu_1q_lescanne_2020 /shared/input/alice_bob_felis_input.json
 | ---- | ---- |
 | QRMI_JOB_QPU_RESOURCES | Backend name |
 | QRMI_JOB_QPU_TYPES | Should be `maestro-local` |
-| <backend_name>_QRMI_JOB_ACQUISITION_TOKEN | Session ID, as returned by `acquire()`. Maestro Local connects to a fixed local Unix socket (`/run/maestro.sock`), so no endpoint/credential environment variables are required. |
+| <backend_name>_QRMI_JOB_ACQUISITION_TOKEN | Existing session ID, exported before starting the runner. |
+| QRMI_MAESTRO_SOCKET | Optional socket path; defaults to `/run/maestro.sock`. |
 
-Unlike the other resource types, `task_runner` does not acquire a Maestro Local session itself, so the session must already exist and its ID must be exported via `<backend_name>_QRMI_JOB_ACQUISITION_TOKEN` before invoking `task_runner` (in a Slurm job this is normally handled by the SPANK plugin; for local testing, acquire a session first, e.g. via the [Maestro Local QRMI example](../../../../examples/qrmi/python/maestro_local)).
+The Python `task_runner` uses the session assigned to the job; it does not acquire a Maestro Local session itself, so the session must already exist and its ID must be exported via `<backend_name>_QRMI_JOB_ACQUISITION_TOKEN` before invoking `task_runner` (in a Slurm job this is normally handled by the SPANK plugin; for local testing, acquire a session in a separate resource and retain it until the runner finishes; the standalone examples release their sessions when they exit).
 
 Example:
 

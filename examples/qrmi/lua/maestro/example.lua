@@ -114,8 +114,12 @@ elseif status == "completed" then
     local result = resource:task_result(task_id)
     print("result:", result)
 else
-    local logs = resource:task_logs(task_id)
-    print("logs:", logs)
+    local logs, logs_err = resource:task_logs(task_id)
+    if logs then
+        print("logs:", logs)
+    else
+        print("logs unavailable:", logs_err)
+    end
 end
 
 resource:task_stop(task_id)

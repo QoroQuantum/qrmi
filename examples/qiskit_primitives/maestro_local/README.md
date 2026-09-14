@@ -18,14 +18,17 @@ $ pip install -r requirements.txt
 
 ## Environment variables
 
-Maestro Local connects to a fixed local Unix socket, so no endpoint/token
-environment variables are required, and it is not looked up through
-`QRMIService` like the cloud-based providers. Instead, each example
-instantiates the QRMI directly for a fixed backend name (`MAESTRO_LOCAL`).
+The examples construct `QuantumResource("MAESTRO_LOCAL", ResourceType.MaestroLocal)`
+directly. Slurm jobs can also use `QRMIService` with
+`QRMI_JOB_QPU_RESOURCES=MAESTRO_LOCAL` and `QRMI_JOB_QPU_TYPES=maestro-local`.
 
-The QRMI wrapper only reads (and each example writes)
-`<backend_name>_QRMI_JOB_ACQUISITION_TOKEN`, which holds the session ID
-returned by `acquire()`.
+The socket defaults to `/run/maestro.sock`; `QRMI_MAESTRO_SOCKET` overrides it.
+`acquire()` retains the session in the resource. To share an existing session,
+set `<backend_name>_QRMI_JOB_ACQUISITION_TOKEN` before constructing the resource.
+The examples export their acquired token for that purpose.
+
+See the [Maestro migration notes](../../../docs/migration/maestro-0.24.md) for
+classified errors, unsupported logs/target data and required rebuilds.
 
 ## How it works
 

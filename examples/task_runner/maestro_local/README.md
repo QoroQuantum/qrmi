@@ -81,6 +81,7 @@ Both tools write a single JSON file matching the `maestro-local` entry of the
 ```shell-session
 export QRMI_JOB_QPU_RESOURCES=MAESTRO_LOCAL
 export QRMI_JOB_QPU_TYPES=maestro-local
+export MAESTRO_LOCAL_QRMI_JOB_ACQUISITION_TOKEN=<existing session ID>
 
 task_runner MAESTRO_LOCAL sampler_input.json
 ```

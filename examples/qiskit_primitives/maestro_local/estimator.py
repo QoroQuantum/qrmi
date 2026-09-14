@@ -23,24 +23,29 @@ import time
 
 from qiskit import QuantumCircuit, qasm2
 from qiskit.quantum_info import SparsePauliOp
-from qrmi import Payload, QuantumResource, ResourceType, TaskStatus
+from qrmi import (
+    Payload,
+    QuantumResource,
+    ResourceType,
+    TaskStatus,
+    UnsupportedFunctionError,
+)
 
 BACKEND_NAME = "MAESTRO_LOCAL"
 QUBITS = 2
 
-# Maestro Local is a fixed local resource, reachable via a Unix domain socket,
-# so (unlike the cloud-based providers) it is not looked up through
-# QRMIService/environment-driven resource lists. It is instantiated directly.
+# Construct a resource directly for this standalone example. Slurm jobs can
+# also discover Maestro through QRMIService using the QRMI_JOB_QPU_* settings.
 qrmi = QuantumResource(BACKEND_NAME, ResourceType.MaestroLocal)
 print(f"Selected resource: id={qrmi.resource_id()} type={str(qrmi.resource_type())}")
 
 is_avail = qrmi.is_accessible()
-print("Maestro Local QR is %s accessible" % ("" if is_avail else "not"))
+print(f"Maestro Local QR is {'' if is_avail else 'not '}accessible")
 if not is_avail:
     raise RuntimeError("Maestro Local QR is not accessible")
 
-# Acquire a session. The session ID must be communicated to the QRMI through
-# the <backend_name>_QRMI_JOB_ACQUISITION_TOKEN environment variable.
+# acquire() retains the session in this resource. Export the token only when
+# sharing the session with another process or resource instance.
 session = qrmi.acquire()
 os.environ[f"{BACKEND_NAME}_QRMI_JOB_ACQUISITION_TOKEN"] = session
 print("Maestro Local session ID:", session)
@@ -85,10 +90,13 @@ while True:
         print("Expectation values:", result.get("expectation_values"))
         break
     if status in (TaskStatus.Failed, TaskStatus.Cancelled):
-        print("Task ended with status %s" % status)
-        print(qrmi.task_logs(task_id))
+        print(f"Task ended with status {status}")
+        try:
+            print(qrmi.task_logs(task_id))
+        except UnsupportedFunctionError:
+            print("Task logs are unavailable for Maestro Local")
         break
-    print("Task status %s, waiting 1s" % status)
+    print(f"Task status {status}, waiting 1s")
     time.sleep(1)
 
 qrmi.task_stop(task_id)

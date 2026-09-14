@@ -7,6 +7,7 @@ pub mod maestro;
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 
 use std::time::Duration;
 
@@ -25,64 +26,67 @@ pub mod maestro_lib {
     }
 
     pub fn send_command_close(command: &str) -> Response {
-        let socket_path = "/run/maestro.sock";
-        if let Ok(mut stream) = UnixStream::connect(socket_path) {
-            stream
-                .set_read_timeout(Some(Duration::from_secs(15)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(15)))
-                .unwrap();
-            stream.set_nonblocking(false).unwrap();
+        let socket_path =
+            std::env::var_os("QRMI_MAESTRO_SOCKET").unwrap_or_else(|| "/run/maestro.sock".into());
+        match exchange(Path::new(&socket_path), command) {
+            Ok(response) => parse_response(&response),
+            Err(error) => Response::ERROR(format!(
+                "Maestro socket {}: {error}",
+                Path::new(&socket_path).display()
+            )),
+        }
+    }
 
-            if let Err(e) = stream.write_all(command.as_bytes()) {
-                return Response::ERROR(format!("Failed to write command: {:?}", e));
+    fn exchange(socket_path: &Path, command: &str) -> std::io::Result<String> {
+        let mut stream = UnixStream::connect(socket_path)?;
+        stream.set_read_timeout(Some(Duration::from_secs(15)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(15)))?;
+        stream.write_all(command.as_bytes())?;
+        stream.shutdown(std::net::Shutdown::Write)?;
+        let mut response = String::new();
+        if BufReader::new(stream).read_line(&mut response)? == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "server closed the connection without a response",
+            ));
+        }
+        Ok(response)
+    }
+
+    fn parse_response(response: &str) -> Response {
+        let response = response.trim();
+        if response == "OK" {
+            return Response::OK(true);
+        }
+        if let Some(rest) = response.strip_prefix("OK ") {
+            match rest.trim() {
+                "YES" | "" => Response::OK(true),
+                "NO" => Response::OK(false),
+                value => Response::OkResponse(value.to_string()),
             }
-
-            // can close the write end now
-            stream
-                .shutdown(std::net::Shutdown::Write)
-                .unwrap_or_else(|e| {
-                    eprintln!("Failed to shutdown client stream on write: {:?}", e);
-                });
-
-            let mut response = String::new();
-            let mut reader = BufReader::new(&mut stream);
-            if reader.read_line(&mut response).is_ok() {
-                stream
-                    .shutdown(std::net::Shutdown::Read)
-                    .unwrap_or_else(|e| {
-                        eprintln!("Failed to shutdown client stream on read: {:?}", e);
-                    });
-
-                if let Some(stripped) = response.strip_prefix("OK ") {
-                    let rest = stripped.trim().trim_end_matches(&['\n', '\r'][..]).trim();
-                    if rest == "YES" || rest.is_empty() {
-                        Response::OK(true)
-                    } else if rest == "NO" {
-                        Response::OK(false)
-                    } else {
-                        Response::OkResponse(rest.to_string())
-                    }
-                } else if response == "OK" || response == "OK\n" || response == "OK\r\n" {
-                    Response::OK(true)
-                } else if let Some(stripped) = response.strip_prefix("ERROR ") {
-                    let rest = stripped.trim().trim_end_matches(&['\n', '\r'][..]).trim();
-                    Response::ERROR(rest.to_string())
-                } else {
-                    Response::ERROR(
-                        response
-                            .trim()
-                            .trim_end_matches(&['\n', '\r'][..])
-                            .trim()
-                            .to_string(),
-                    )
-                }
-            } else {
-                Response::ERROR("Failed to read response".to_string())
-            }
+        } else if let Some(rest) = response.strip_prefix("ERROR ") {
+            Response::ERROR(rest.trim().to_string())
         } else {
-            Response::ERROR(format!("Failed to connect to socket at {}", socket_path))
+            Response::ERROR(format!("Unexpected response: {response:?}"))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parses_acknowledgements_values_and_errors() {
+            assert!(matches!(parse_response("OK YES\r\n"), Response::OK(true)));
+            assert!(matches!(parse_response("OK\n"), Response::OK(true)));
+            assert!(matches!(parse_response("OK NO\n"), Response::OK(false)));
+            assert!(matches!(parse_response("OK 123\n"), Response::OkResponse(id) if id == "123"));
+            assert!(
+                matches!(parse_response("ERROR refused\n"), Response::ERROR(message) if message == "refused")
+            );
+            assert!(
+                matches!(parse_response("broken\n"), Response::ERROR(message) if message.contains("Unexpected response"))
+            );
         }
     }
 }
@@ -92,6 +96,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires a running Maestro server at /run/maestro.sock"]
     fn simple_test() {
         let response = maestro_lib::send_command_close("SESSION 0 EXISTS");
         assert!(

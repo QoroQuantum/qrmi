@@ -1,0 +1,28 @@
+features:
+  - |
+    Maestro Local supports an optional ``QRMI_MAESTRO_SOCKET`` environment
+    variable to select a Unix socket instead of the default
+    ``/run/maestro.sock``.
+upgrade:
+  - |
+    Maestro Local reports QRMI's ``UnsupportedFunction`` error for target
+    information and task logs instead of returning placeholder values.
+    Applications should handle the corresponding Python exception or C
+    return code when requesting these optional operations.
+  - |
+    Maestro Local reads an existing acquisition token when the resource is
+    constructed and retains acquired sessions in the instance. Set
+    ``<backend_name>_QRMI_JOB_ACQUISITION_TOKEN`` before constructing a resource
+    when sharing an existing session. Releasing a session uses the explicit
+    token and clears the instance's active session when it matches.
+fixes:
+  - |
+    Maestro Local classifies invalid configuration, malformed task input and
+    missing tasks using QRMI's shared error categories. Socket and server
+    failures retain their diagnostic messages, and rejected submissions
+    attempt to clean up their partially configured tasks.
+  - |
+    Maestro Local checks cancellation acknowledgements and preserves observed
+    terminal task states. Consuming results no longer makes a completed task
+    appear cancelled; a repeated result request reports ``TaskNotFound``.
+    Stale sessions are replaced only after the server confirms their absence.

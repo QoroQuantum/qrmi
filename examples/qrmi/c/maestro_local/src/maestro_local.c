@@ -41,10 +41,12 @@ int main(int argc, char *argv[]) {
 
     load_dotenv();
 
-    QrmiQuantumResource *qrmi = qrmi_resource_new(backend_name, QRMI_RESOURCE_TYPE_MAESTRO_LOCAL);
+    QrmiQuantumResource *qrmi =
+        qrmi_resource_new(backend_name, QRMI_RESOURCE_TYPE_MAESTRO_LOCAL);
     if (!qrmi) {
         const char *last_error = qrmi_get_last_error();
-        fprintf(stderr, "Failed to create QRMI for %s. %s\n", backend_name, last_error);
+        fprintf(stderr, "Failed to create QRMI for %s. %s\n", backend_name,
+                last_error);
         qrmi_string_free((char *)last_error);
         return EXIT_FAILURE;
     }
@@ -56,8 +58,10 @@ int main(int argc, char *argv[]) {
         QrmiResourceType resource_type;
         rc = qrmi_resource_type(qrmi, &resource_type);
         if (rc == QRMI_RETURN_CODE_SUCCESS) {
-            const char *resource_type_str = qrmi_config_resource_type_to_str(resource_type);
-            fprintf(stdout, "Selected resource: id=%s type=%s\n", resource_id, resource_type_str);
+            const char *resource_type_str =
+                qrmi_config_resource_type_to_str(resource_type);
+            fprintf(stdout, "Selected resource: id=%s type=%s\n", resource_id,
+                    resource_type_str);
         }
         qrmi_string_free(resource_id);
     }
@@ -71,7 +75,8 @@ int main(int argc, char *argv[]) {
         }
     } else {
         const char *last_error = qrmi_get_last_error();
-        fprintf(stderr, "qrmi_resource_is_accessible() failed. %s\n", last_error);
+        fprintf(stderr, "qrmi_resource_is_accessible() failed. %s\n",
+                last_error);
         qrmi_string_free((char *)last_error);
         goto error;
     }
@@ -86,7 +91,8 @@ int main(int argc, char *argv[]) {
     }
     fprintf(stdout, "acquisition_token = %s\n", acquisition_token);
 
-    // Set acquisition token as env variable <backend_name>_QRMI_JOB_ACQUISITION_TOKEN
+    // Set acquisition token as env variable
+    // <backend_name>_QRMI_JOB_ACQUISITION_TOKEN
     const char *suffix = "_QRMI_JOB_ACQUISITION_TOKEN";
     char *token_var = malloc(strlen(backend_name) + strlen(suffix) + 1);
     strcpy(token_var, backend_name);
@@ -99,6 +105,9 @@ int main(int argc, char *argv[]) {
     if (rc == QRMI_RETURN_CODE_SUCCESS) {
         fprintf(stdout, "target = %s\n", target);
         qrmi_string_free((char *)target);
+    } else if (rc == QRMI_RETURN_CODE_UNSUPPORTED_FUNCTION_ERROR) {
+        fprintf(stdout,
+                "Target information is unavailable for Maestro Local.\n");
     } else {
         fprintf(stderr, "qrmi_resource_target() failed.\n");
         goto error;
@@ -129,29 +138,35 @@ int main(int argc, char *argv[]) {
     fprintf(stdout, "Job ID: %s\n", job_id);
     free((void *)input);
 
-    QrmiTaskStatus status;
+    QrmiTaskStatus status = QRMI_TASK_STATUS_QUEUED;
     while (1) {
         rc = qrmi_resource_task_status(qrmi, job_id, &status);
         if (rc != QRMI_RETURN_CODE_SUCCESS ||
-            (status != QRMI_TASK_STATUS_RUNNING && status != QRMI_TASK_STATUS_QUEUED)) {
+            (status != QRMI_TASK_STATUS_RUNNING &&
+             status != QRMI_TASK_STATUS_QUEUED)) {
             break;
         }
         sleep(1);
     }
 
-    if (rc == QRMI_RETURN_CODE_SUCCESS && status == QRMI_TASK_STATUS_COMPLETED) {
+    if (rc == QRMI_RETURN_CODE_SUCCESS &&
+        status == QRMI_TASK_STATUS_COMPLETED) {
         char *result = NULL;
         rc = qrmi_resource_task_result(qrmi, job_id, &result);
         if (rc == QRMI_RETURN_CODE_SUCCESS) {
             fprintf(stdout, "%s\n", result);
             qrmi_string_free((char *)result);
         }
-    } else if (status == QRMI_TASK_STATUS_FAILED || status == QRMI_TASK_STATUS_CANCELLED) {
+    } else if (rc == QRMI_RETURN_CODE_SUCCESS &&
+               (status == QRMI_TASK_STATUS_FAILED ||
+                status == QRMI_TASK_STATUS_CANCELLED)) {
         char *logs = NULL;
         rc = qrmi_resource_task_logs(qrmi, job_id, &logs);
         if (rc == QRMI_RETURN_CODE_SUCCESS) {
             fprintf(stdout, "%s\n", logs);
             qrmi_string_free(logs);
+        } else if (rc == QRMI_RETURN_CODE_UNSUPPORTED_FUNCTION_ERROR) {
+            fprintf(stdout, "Task logs are unavailable for Maestro Local.\n");
         }
     }
 
