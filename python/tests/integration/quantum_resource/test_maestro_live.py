@@ -17,7 +17,6 @@ from qrmi import (
     TaskNotFoundError,
     TaskNotReadyError,
     TaskStatus,
-    UnsupportedFunctionError,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -108,15 +107,25 @@ def wait_for_completion(resource, task_id):
     pytest.fail(f"Task {task_id} did not complete within 60 seconds")
 
 
+def backend_id(resource, name):
+    """Legacy IDs depend on the server build; discover them by backend name."""
+    capabilities = json.loads(resource.target().value)
+    for backend in capabilities["native"]["backends"]:
+        if backend["name"] == name:
+            return backend["legacy_id"]
+    return pytest.skip(f"The current Maestro build does not include {name}")
+
+
 @pytest.mark.parametrize(
-    "simulator,method,expected_simulator,expected_method",
-    [(0, 0, "aer", "statevector"), (1, 1, "qcsim", "matrix_product_state")],
+    "expected_simulator,method,expected_method",
+    [("aer", 0, "statevector"), ("qcsim", 1, "matrix_product_state")],
 )
 def test_execute_and_consumed_results(
-    live_resource, command, simulator, method, expected_simulator, expected_method
+    live_resource, command, method, expected_simulator, expected_method
 ):
     """Validate counts and retain completion after consuming real results."""
     resource, token = live_resource
+    simulator = backend_id(resource, expected_simulator)
     task_id = resource.task_start(payload(PREPARE + MEASURE, simulator, method))
     wait_for_completion(resource, task_id)
     result = json.loads(resource.task_result(task_id).value)
@@ -125,15 +134,19 @@ def test_execute_and_consumed_results(
     assert result["method"] == expected_method
     assert command(f"SESSION {token} TASK {task_id} EXISTS") == "OK NO"
     assert resource.task_status(task_id) == TaskStatus.Completed
+    diagnostics = json.loads(resource.task_logs(task_id))
+    assert diagnostics["ok"] is True
+    assert diagnostics["failure_message"] is None
     resource.task_stop(task_id)
     with pytest.raises(TaskNotFoundError):
         resource.task_result(task_id)
 
 
-@pytest.mark.parametrize("simulator,method", [(0, 0), (1, 1)])
-def test_estimate_bell_state(live_resource, simulator, method):
+@pytest.mark.parametrize("backend,method", [("aer", 0), ("qcsim", 1)])
+def test_estimate_bell_state(live_resource, backend, method):
     """Check three Bell-state expectation values against their exact values."""
     resource, _ = live_resource
+    simulator = backend_id(resource, backend)
     task_id = resource.task_start(
         payload(BELL, simulator, method, job_type="estimate", observables="ZZ;XX;YY")
     )
@@ -166,9 +179,10 @@ def test_release_and_stale_token_replacement(live_resource, command, monkeypatch
     resource, token = live_resource
     with pytest.raises(TaskNotFoundError):
         resource.task_status("4294967295")
-    with pytest.raises(UnsupportedFunctionError):
-        resource.target()
-    with pytest.raises(UnsupportedFunctionError):
+    capabilities = json.loads(resource.target().value)
+    assert capabilities["version"] == 2
+    assert capabilities["native"]["python_required"] is False
+    with pytest.raises(TaskNotFoundError):
         resource.task_logs("4294967295")
     resource.release(token)
     assert command(f"SESSION {token} EXISTS") == "OK NO"

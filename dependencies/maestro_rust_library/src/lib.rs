@@ -5,7 +5,7 @@
 
 pub mod maestro;
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
@@ -25,29 +25,47 @@ pub mod maestro_lib {
         send_command_close("PING\n")
     }
 
+    pub fn socket_path() -> std::path::PathBuf {
+        std::env::var_os("QRMI_MAESTRO_SOCKET")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| "/run/maestro.sock".into())
+    }
+
     pub fn send_command_close(command: &str) -> Response {
-        let socket_path =
-            std::env::var_os("QRMI_MAESTRO_SOCKET").unwrap_or_else(|| "/run/maestro.sock".into());
-        match exchange(Path::new(&socket_path), command) {
+        send_command_at(&socket_path(), command)
+    }
+
+    pub fn send_command_at(socket_path: &Path, command: &str) -> Response {
+        match exchange(socket_path, command) {
             Ok(response) => parse_response(&response),
-            Err(error) => Response::ERROR(format!(
-                "Maestro socket {}: {error}",
-                Path::new(&socket_path).display()
-            )),
+            Err(error) => {
+                Response::ERROR(format!("Maestro socket {}: {error}", socket_path.display()))
+            }
         }
     }
 
-    fn exchange(socket_path: &Path, command: &str) -> std::io::Result<String> {
+    pub(crate) fn exchange(socket_path: &Path, command: &str) -> std::io::Result<String> {
         let mut stream = UnixStream::connect(socket_path)?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
         stream.set_write_timeout(Some(Duration::from_secs(15)))?;
         stream.write_all(command.as_bytes())?;
         stream.shutdown(std::net::Shutdown::Write)?;
         let mut response = String::new();
-        if BufReader::new(stream).read_line(&mut response)? == 0 {
+        const MAX_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
+        if BufReader::new(stream)
+            .take(MAX_RESPONSE_BYTES + 1)
+            .read_line(&mut response)?
+            == 0
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "server closed the connection without a response",
+            ));
+        }
+        if response.len() as u64 > MAX_RESPONSE_BYTES || !response.ends_with('\n') {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Oversized or truncated Maestro response",
             ));
         }
         Ok(response)

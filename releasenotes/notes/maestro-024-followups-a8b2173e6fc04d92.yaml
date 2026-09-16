@@ -5,8 +5,9 @@ features:
     ``/run/maestro.sock``.
 upgrade:
   - |
-    Maestro Local reports QRMI's ``UnsupportedFunction`` error for target
-    information and task logs instead of returning placeholder values.
+    With servers that lack the native request API, Maestro Local reports
+    QRMI's ``UnsupportedFunction`` error for target information and task logs
+    instead of returning placeholder values.
     Applications should handle the corresponding Python exception or C
     return code when requesting these optional operations.
   - |

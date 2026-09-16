@@ -10,10 +10,11 @@
 // copyright notice, and modified files need to carry a notice indicating
 // that they have been altered from the originals.
 
-use crate::models::{Payload, ResourceType, TaskResult, TaskStatus};
+use crate::models::{Payload, ResourceType, Target, TaskResult, TaskStatus};
 use crate::{QrmiError, QuantumResource, Result};
 use anyhow::anyhow;
 use async_trait::async_trait;
+use maestro_local_api::maestro::request::{Client as RequestClient, Error as RequestError};
 use maestro_local_api::maestro::session::{Session, Task, TaskType};
 use std::collections::HashMap;
 use std::env;
@@ -26,12 +27,46 @@ use std::env;
 pub struct MaestroLocal {
     backend_name: String,
     session_id: Option<u32>,
+    request_client: RequestClient,
     // Maestro removes tasks when results are retrieved or cancellation succeeds.
     // Remember terminal states we have actually observed, scoped to the session.
     terminal_tasks: HashMap<(u32, u32), TaskStatus>,
 }
 
 impl MaestroLocal {
+    // The socket client is synchronous. Keep its potentially blocking work off
+    // async executor threads, including callers using a non-Tokio executor.
+    async fn native_api<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(RequestClient) -> std::result::Result<T, RequestError> + Send + 'static,
+    ) -> Result<T> {
+        let client = self.request_client.clone();
+        let value = if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime
+                .spawn_blocking(move || operation(client))
+                .await
+                .map_err(|error| anyhow!("Maestro API worker failed: {error}"))?
+        } else {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(operation(client));
+            });
+            receiver
+                .await
+                .map_err(|error| anyhow!("Maestro API worker failed: {error}"))?
+        };
+        value.map_err(|error| match error.code.as_str() {
+            "invalid_input" => QrmiError::InvalidInput(error.message),
+            "unsupported_api"
+            | "unsupported_version"
+            | "unsupported_capability"
+            | "unsupported_operation" => QrmiError::UnsupportedFunction(error.to_string()),
+            "invalid_config" | "session_not_found" => QrmiError::InvalidConfig(error.to_string()),
+            "task_not_found" => QrmiError::TaskNotFound(error.message),
+            _ => anyhow!("Maestro API: {error}").into(),
+        })
+    }
+
     /// Constructs a Maestro Local instance.
     ///
     /// Environment variables used:
@@ -59,6 +94,7 @@ impl MaestroLocal {
         Ok(Self {
             backend_name: backend_name.to_string(),
             session_id,
+            request_client: RequestClient::default(),
             terminal_tasks: HashMap::new(),
         })
     }
@@ -80,9 +116,9 @@ impl MaestroLocal {
         })
     }
 
-    async fn ensure_task_exists(task: &Task) -> Result<()> {
+    async fn ensure_task_exists(&self, task: &Task) -> Result<()> {
         if task
-            .exists()
+            .exists_at(self.request_client.socket_path())
             .await
             .map_err(|e| anyhow!("Failed to check task {}: {e}", task.id))?
         {
@@ -95,6 +131,7 @@ impl MaestroLocal {
     /// Preserve the original failure unless the server confirms that the task
     /// disappeared between the existence check and the requested operation.
     async fn task_response<T>(
+        &self,
         task: &Task,
         operation: &str,
         response: std::result::Result<T, String>,
@@ -102,7 +139,10 @@ impl MaestroLocal {
         match response {
             Ok(value) => Ok(value),
             Err(error) => {
-                if matches!(task.exists().await, Ok(false)) {
+                if matches!(
+                    task.exists_at(self.request_client.socket_path()).await,
+                    Ok(false)
+                ) {
                     return Err(QrmiError::TaskNotFound(task.id.to_string()));
                 }
                 Err(anyhow!("{operation} for task {}: {error}", task.id).into())
@@ -133,7 +173,10 @@ impl QuantumResource for MaestroLocal {
 
     async fn is_accessible(&mut self) -> Result<bool> {
         use maestro_local_api::maestro_lib::Response;
-        match maestro_local_api::maestro_lib::ping().await {
+        match maestro_local_api::maestro_lib::send_command_at(
+            self.request_client.socket_path(),
+            "PING\n",
+        ) {
             Response::OK(accessible) => Ok(accessible),
             Response::ERROR(error) => Err(anyhow!("Error pinging Maestro Local: {error}").into()),
             response => Err(anyhow!("Unexpected Maestro Local ping response: {response:?}").into()),
@@ -142,7 +185,7 @@ impl QuantumResource for MaestroLocal {
 
     async fn acquire(&mut self) -> Result<String> {
         if let Some(id) = self.session_id {
-            if Session::session_exists(id)
+            if Session::session_exists_at(id, self.request_client.socket_path())
                 .await
                 .map_err(|e| anyhow!("Failed to check session {id}: {e}"))?
             {
@@ -151,8 +194,8 @@ impl QuantumResource for MaestroLocal {
             self.session_id = None;
             self.terminal_tasks.clear();
         }
-        let session =
-            Session::new().map_err(|e| anyhow!("Failed to acquire a new session: {e}"))?;
+        let session = Session::new_at(self.request_client.socket_path())
+            .map_err(|e| anyhow!("Failed to acquire a new session: {e}"))?;
         self.session_id = Some(session.get_id());
         Ok(session.get_id().to_string())
     }
@@ -164,7 +207,7 @@ impl QuantumResource for MaestroLocal {
             .parse::<u32>()
             .map_err(|_| QrmiError::InvalidInput(format!("Invalid session ID: {id}")))?;
         let session = Session { id: session_id };
-        match session.delete().await {
+        match session.delete_at(self.request_client.socket_path()).await {
             Ok(true) => {
                 if self.session_id == Some(session_id) {
                     self.session_id = None;
@@ -191,6 +234,23 @@ impl QuantumResource for MaestroLocal {
         else {
             return Err(QrmiError::UnsupportedPayload(format!("{payload:?}")));
         };
+
+        if job_type.eq_ignore_ascii_case("request") {
+            let request: serde_json::Value = serde_json::from_str(&input)?;
+            if !request.is_object() || request["schema_version"].as_u64() != Some(2) {
+                return Err(QrmiError::InvalidInput(
+                    "Maestro request requires a JSON object with schema_version=2".into(),
+                ));
+            }
+            // All new configuration lives in the native document. These old
+            // positional fields are intentionally unused in request mode.
+            let session_id = self.get_session_id()?;
+            let id = self
+                .native_api(move |client| client.submit(session_id, &input))
+                .await?;
+            self.terminal_tasks.remove(&(session_id, id));
+            return Ok(id.to_string());
+        }
 
         // Reject malformed input before creating a task on the server.
         let task_type = if job_type.eq_ignore_ascii_case("execute") {
@@ -223,35 +283,63 @@ impl QuantumResource for MaestroLocal {
             id: self.get_session_id()?,
         };
         let task = session
-            .create_task()
+            .create_task_at(self.request_client.socket_path())
             .await
             .map_err(|e| anyhow!("Failed to create task: {e}"))?;
         let estimate = matches!(task_type, TaskType::ESTIMATE);
         let configured = async {
-            Self::accepted("set task type", task.set_type(task_type).await)?;
+            Self::accepted(
+                "set task type",
+                task.set_type_at(task_type, self.request_client.socket_path())
+                    .await,
+            )?;
             if estimate {
                 Self::accepted(
                     "set observables",
-                    task.set_observables_as_string(observables).await,
+                    task.set_observables_as_string_at(
+                        observables,
+                        self.request_client.socket_path(),
+                    )
+                    .await,
                 )?;
             }
-            Self::accepted("set qubits", task.set_qubits(qubits).await)?;
+            Self::accepted(
+                "set qubits",
+                task.set_qubits_at(qubits, self.request_client.socket_path())
+                    .await,
+            )?;
             Self::accepted(
                 "set simulator type",
-                task.set_simulator_type(simulator_type).await,
+                task.set_simulator_type_at(simulator_type, self.request_client.socket_path())
+                    .await,
             )?;
             Self::accepted(
                 "set simulation method",
-                task.set_simulation_method(simulation_method).await,
+                task.set_simulation_method_at(simulation_method, self.request_client.socket_path())
+                    .await,
             )?;
-            Self::accepted("set QASM", task.set_qasm(input).await)?;
-            Self::accepted("set options JSON", task.set_options_json(config).await)?;
-            Self::accepted("execute task", task.execute().await)
+            Self::accepted(
+                "set QASM",
+                task.set_qasm_at(input, self.request_client.socket_path())
+                    .await,
+            )?;
+            Self::accepted(
+                "set options JSON",
+                task.set_options_json_at(config, self.request_client.socket_path())
+                    .await,
+            )?;
+            Self::accepted(
+                "execute task",
+                task.execute_at(self.request_client.socket_path()).await,
+            )
         }
         .await;
         if let Err(error) = configured {
             // A failed submission otherwise loses the only handle to the task.
-            if !matches!(task.cancel().await, Ok(true)) {
+            if !matches!(
+                task.cancel_at(self.request_client.socket_path()).await,
+                Ok(true)
+            ) {
                 log::warn!(
                     "Failed to clean up Maestro task {} after rejected submission",
                     task.id
@@ -271,7 +359,7 @@ impl QuantumResource for MaestroLocal {
         ) {
             return Ok(());
         }
-        let response = task.cancel().await;
+        let response = task.cancel_at(self.request_client.socket_path()).await;
         if matches!(response, Ok(true)) {
             self.terminal_tasks
                 .insert((task.session_id, task.id), TaskStatus::Cancelled);
@@ -296,31 +384,50 @@ impl QuantumResource for MaestroLocal {
         if let Some(status) = self.terminal_tasks.get(&key) {
             return Ok(status.clone());
         }
-        Self::ensure_task_exists(&task).await?;
-        let status =
-            if Self::task_response(&task, "Failed to get failure status", task.failed().await)
+        self.ensure_task_exists(&task).await?;
+        let status = if self
+            .task_response(
+                &task,
+                "Failed to get failure status",
+                task.failed_at(self.request_client.socket_path()).await,
+            )
+            .await?
+        {
+            TaskStatus::Failed
+        } else if self
+            .task_response(
+                &task,
+                "Failed to get completion status",
+                task.finished_at(self.request_client.socket_path()).await,
+            )
+            .await?
+        {
+            // Failure can become visible between FAILED and FINISHED.
+            // Once FINISHED is true, re-read failure before caching status.
+            if self
+                .task_response(
+                    &task,
+                    "Failed to get final failure status",
+                    task.failed_at(self.request_client.socket_path()).await,
+                )
                 .await?
             {
                 TaskStatus::Failed
-            } else if Self::task_response(
-                &task,
-                "Failed to get completion status",
-                task.finished().await,
-            )
-            .await?
-            {
+            } else {
                 TaskStatus::Completed
-            } else if Self::task_response(
+            }
+        } else if self
+            .task_response(
                 &task,
                 "Failed to get running status",
-                task.running().await,
+                task.running_at(self.request_client.socket_path()).await,
             )
             .await?
-            {
-                TaskStatus::Running
-            } else {
-                TaskStatus::Queued
-            };
+        {
+            TaskStatus::Running
+        } else {
+            TaskStatus::Queued
+        };
         if matches!(status, TaskStatus::Completed | TaskStatus::Failed) {
             self.terminal_tasks.insert(key, status.clone());
         }
@@ -338,17 +445,28 @@ impl QuantumResource for MaestroLocal {
         }
         // GET_RESULTS consumes the server-side task. Repeated result retrieval
         // reports TaskNotFound, while the known Completed status stays available.
-        Self::ensure_task_exists(&task).await?;
-        let value = Self::task_response(
-            &task,
-            "Failed to get results",
-            task.get_results_as_string().await,
-        )
-        .await?;
+        self.ensure_task_exists(&task).await?;
+        let value = self
+            .task_response(
+                &task,
+                "Failed to get results",
+                task.get_results_as_string_at(self.request_client.socket_path())
+                    .await,
+            )
+            .await?;
         Ok(TaskResult { value })
     }
 
-    // task_logs() and target() use the trait's UnsupportedFunction defaults.
+    async fn task_logs(&mut self, task_id: &str) -> Result<String> {
+        let task = self.task(task_id)?;
+        self.native_api(move |client| client.logs(task.session_id, task.id))
+            .await
+    }
+
+    async fn target(&mut self) -> Result<Target> {
+        let value = self.native_api(|client| client.capabilities()).await?;
+        Ok(Target { value })
+    }
 
     async fn metadata(&mut self) -> HashMap<String, String> {
         HashMap::from([("backend_name".to_string(), self.backend_name.clone())])

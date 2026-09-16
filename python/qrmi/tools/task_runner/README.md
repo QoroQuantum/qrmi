@@ -269,3 +269,31 @@ task_runner MAESTRO_LOCAL /shared/input/sampler_input.json
 ## License
 
 [Apache-2.0](../../../../LICENSE.txt)
+
+### Native Maestro requests
+
+Both task runners also accept raw Maestro schema-2 documents and `{ "request": ... }`
+wrappers for configuration, noise, queries and GPU distribution. See the
+[native API guide](../../../../docs/maestro-native-api.md) and the `native-*.json`
+files in `examples/task_runner/maestro_local`. The assigned session remains required.
+
+
+Both task runners exit nonzero on task failure, cancellation, or failed result
+retrieval/output. Available task diagnostics go to stderr before cleanup. A failed
+log query is reported without replacing the original task failure. Native
+`job_type: "request"` envelopes accept object or serialized JSON `input`, without
+requiring legacy simulator fields.
+
+For legacy Maestro payloads, omitted or null `config` becomes `{}` in both
+runners; objects and serialized configuration strings are also accepted. Job
+types are case-insensitive. The `{ "request": ... }` wrapper accepts no sibling
+fields. Bare native documents reject legacy envelope fields, and all Maestro forms
+reject fields belonging to another backend. The `job_type:"request"` compatibility
+envelope intentionally permits and ignores known legacy fields outside `input`.
+Native configuration belongs inside `input`. Both runners and the schema agree on
+this exception. Missing required Python fields produce descriptive `ValueError`s.
+
+Native `execution.shots` is valid only for `execute` and `checkpoint_batch`.
+Estimation, state queries and incremental evolution use `execution.seed` without
+shots. See the example directory for thermal/idle noise, correlated noise,
+checkpoint and incremental Kraus-channel requests.

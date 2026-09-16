@@ -65,9 +65,10 @@ Invalid JSON options are also classified as invalid input. Unclassified server
 and socket failures remain `Other` / `QrmiError` / code 100 with a diagnostic
 message. These should not be assumed to be authentication or input errors.
 
-`task_logs()` and `target()` explicitly report that they are unsupported. Examples
-handle these errors and continue to task/session cleanup. Maestro's real session
-acquisition and release implementations remain in place.
+With native API v2, `target()` returns capabilities and `task_logs()` returns
+structured diagnostics. Older servers return `UnsupportedFunction` for unsupported
+API negotiation. See [the native request guide](../maestro-native-api.md). Session
+acquisition and release retain their existing behavior.
 
 `task_stop()` skips tasks already known to be terminal. Cancellation requires a
 positive server acknowledgement. A negative acknowledgement or error is accepted

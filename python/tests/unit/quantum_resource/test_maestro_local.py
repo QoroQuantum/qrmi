@@ -1,6 +1,7 @@
 """Maestro binding regressions using a scripted Unix socket, without a daemon."""
 
 import ctypes
+import json
 import os
 import socket
 import tempfile
@@ -92,9 +93,7 @@ def test_python_errors_are_classified_without_a_session(monkeypatch):
         resource.task_status("1")
     with pytest.raises(InvalidInputError):
         resource.release("invalid")
-    with pytest.raises(UnsupportedFunctionError):
-        resource.target()
-    with pytest.raises(UnsupportedFunctionError):
+    with pytest.raises(ConfigError):
         resource.task_logs("1")
     with pytest.raises(UnsupportedPayloadError):
         resource.task_start(Payload.QiskitPrimitive(input="{}", program_id="sampler"))
@@ -222,7 +221,12 @@ def test_c_error_codes_and_maestro_enum(c_api, server, monkeypatch):
         c_api.qrmi_string_free(message)
 
     monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "8")
-    server.append(("SESSION 8 TASK 1 EXISTS", "OK NO"))
+    server.extend(
+        [
+            ('API {"version":2,"command":"capabilities"}', "ERROR Unknown command"),
+            ("SESSION 8 TASK 1 EXISTS", "OK NO"),
+        ]
+    )
     resource = c_api.qrmi_resource_new(b"py_maestro", int(ResourceType.MaestroLocal))
     assert resource
     try:
@@ -264,3 +268,44 @@ def test_c_service_discovers_maestro(c_api, server, monkeypatch):
         assert kind.value == int(ResourceType.MaestroLocal)
     finally:
         c_api.qrmi_service_resources_free(ctypes.byref(resources))
+
+
+def test_target_negotiates_old_server(server):
+    """Report unsupported capabilities when a legacy daemon rejects the API."""
+    server.append(
+        ('API {"version":2,"command":"capabilities"}', "ERROR Unknown command")
+    )
+    with pytest.raises(UnsupportedFunctionError):
+        QuantumResource("py_maestro", ResourceType.MaestroLocal).target()
+
+
+@pytest.mark.parametrize(
+    "code,exception",
+    [
+        ("unsupported_capability", UnsupportedFunctionError),
+        ("unsupported_operation", UnsupportedFunctionError),
+        ("invalid_config", ConfigError),
+        ("session_not_found", ConfigError),
+    ],
+)
+def test_native_error_codes_reach_python_categories(
+    server, monkeypatch, code, exception
+):
+    """Preserve native error categories and messages in Python exceptions."""
+    monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "4")
+    server.append(
+        (
+            'API {"version":2,"command":"logs","session_id":4,"task_id":8}',
+            "OK "
+            + json.dumps(
+                {
+                    "version": 2,
+                    "ok": False,
+                    "error": {"code": code, "message": "review probe"},
+                }
+            ),
+        )
+    )
+    resource = QuantumResource("py_maestro", ResourceType.MaestroLocal)
+    with pytest.raises(exception, match="review probe"):
+        resource.task_logs("8")

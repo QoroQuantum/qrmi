@@ -143,8 +143,101 @@ fn resource(session: Option<u32>) -> MaestroLocal {
     MaestroLocal {
         backend_name: "test_maestro".into(),
         session_id: session,
+        request_client: Default::default(),
         terminal_tasks: Default::default(),
     }
+}
+
+fn request_payload(input: String) -> Payload {
+    Payload::MaestroLocal {
+        input,
+        job_type: "request".into(),
+        qubits: 0,
+        simulator_type: 0,
+        simulation_method: 0,
+        observables: String::new(),
+        config: "{}".into(),
+    }
+}
+
+#[test]
+fn native_request_negotiates_and_submits_without_legacy_setters() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let input = serde_json::json!({
+        "schema_version": 2, "operation": "execute",
+        "circuit": {"source": "OPENQASM 2.0;\n// preserve\nqreg q[1];", "num_qubits": 1},
+        "simulator": {"backend": "distributed_gpu", "method": "statevector",
+                      "distribution": {"devices": [0, 1]}}
+    })
+    .to_string();
+    let submit = format!(
+        "API {{\"version\":2,\"command\":\"submit\",\"session_id\":3,\"request\":{input}}}"
+    );
+    let server = Server::new(&[
+        (
+            "API {\"version\":2,\"command\":\"capabilities\"}",
+            "OK {\"version\":2,\"ok\":true,\"native\":{\"schema_version\":2}}",
+        ),
+        (&submit, "OK {\"version\":2,\"ok\":true,\"task_id\":9}"),
+    ]);
+    let mut qrmi = resource(Some(3));
+    assert_eq!(
+        block_on(qrmi.task_start(request_payload(input))).unwrap(),
+        "9"
+    );
+    server.assert_done();
+}
+
+#[test]
+fn native_target_and_failure_logs_preserve_vendor_documents() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let server = Server::new(&[
+        ("API {\"version\":2,\"command\":\"capabilities\"}",
+         "OK {\"version\":2,\"ok\":true,\"native\":{\"schema_version\":2,\"noise_channels\":[\"thermal_relaxation\"]}}"),
+        ("API {\"version\":2,\"command\":\"logs\",\"session_id\":4,\"task_id\":8}",
+         "OK {\"version\":2,\"ok\":true,\"logs\":\"native diagnostic\\n\",\"error\":{\"code\":\"backend_unavailable\",\"message\":\"No GPUs\"}}"),
+    ]);
+    let mut qrmi = resource(Some(4));
+    let target: serde_json::Value =
+        serde_json::from_str(&block_on(qrmi.target()).unwrap().value).unwrap();
+    assert_eq!(target["native"]["noise_channels"][0], "thermal_relaxation");
+    let logs: serde_json::Value =
+        serde_json::from_str(&block_on(qrmi.task_logs("8")).unwrap()).unwrap();
+    assert_eq!(logs["error"]["code"], "backend_unavailable");
+    assert_eq!(logs["logs"], "native diagnostic\n");
+    server.assert_done();
+}
+
+#[test]
+fn old_server_cannot_silently_accept_native_features() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let server = Server::new(&[(
+        "API {\"version\":2,\"command\":\"capabilities\"}",
+        "ERROR Unknown command",
+    )]);
+    let mut qrmi = resource(Some(3));
+    let error = block_on(qrmi.task_start(request_payload(
+        r#"{"schema_version":2,"operation":"execute"}"#.into(),
+    )))
+    .unwrap_err();
+    assert_eq!(error.kind(), QrmiErrorKind::UnsupportedFunction);
+    server.assert_done();
+}
+
+#[test]
+fn malformed_native_request_does_not_create_a_task() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let server = Server::new(&[]);
+    let mut qrmi = resource(Some(3));
+    for input in ["{", "[]", r#"{"schema_version":1}"#] {
+        assert_eq!(
+            block_on(qrmi.task_start(request_payload(input.into())))
+                .unwrap_err()
+                .kind(),
+            QrmiErrorKind::InvalidInput
+        );
+    }
+    server.assert_done();
 }
 
 #[test]
@@ -211,11 +304,7 @@ fn classified_configuration_and_input_errors_do_not_contact_server() {
         }
         assert_eq!(
             qrmi.task_logs("1").await.unwrap_err().kind(),
-            QrmiErrorKind::UnsupportedFunction
-        );
-        assert_eq!(
-            qrmi.target().await.unwrap_err().kind(),
-            QrmiErrorKind::UnsupportedFunction
+            QrmiErrorKind::InvalidConfig
         );
     });
     server.assert_done();
@@ -317,6 +406,7 @@ fn submission_and_consumed_results_keep_completed_status() {
         ("SESSION 8 TASK 1 EXISTS", "OK YES"),
         ("SESSION 8 TASK 1 FAILED", "OK NO"),
         ("SESSION 8 TASK 1 FINISHED", "OK YES"),
+        ("SESSION 8 TASK 1 FAILED", "OK NO"),
         ("SESSION 8 TASK 1 EXISTS", "OK YES"),
         ("SESSION 8 TASK 1 GET_RESULTS", "OK {\"counts\":{\"0\":4}}"),
         ("SESSION 8 TASK 1 EXISTS", "OK NO"),
@@ -411,6 +501,7 @@ fn cancellation_race_with_completion_is_benign() {
         ("SESSION 8 TASK 1 EXISTS", "OK YES"),
         ("SESSION 8 TASK 1 FAILED", "OK NO"),
         ("SESSION 8 TASK 1 FINISHED", "OK YES"),
+        ("SESSION 8 TASK 1 FAILED", "OK NO"),
     ]);
     block_on(async {
         let mut qrmi = resource(Some(8));
@@ -505,4 +596,136 @@ fn service_discovers_maestro_filters_unavailable_resources_and_keeps_session() {
         );
     });
     server.assert_done();
+}
+
+#[test]
+fn failure_published_between_status_queries_is_not_cached_as_success() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let server = Server::new(&[
+        ("SESSION 8 TASK 1 EXISTS", "OK YES"),
+        ("SESSION 8 TASK 1 FAILED", "OK NO"),
+        ("SESSION 8 TASK 1 FINISHED", "OK YES"),
+        ("SESSION 8 TASK 1 FAILED", "OK YES"),
+    ]);
+    block_on(async {
+        let mut qrmi = resource(Some(8));
+        assert_eq!(qrmi.task_status("1").await.unwrap(), TaskStatus::Failed);
+        assert_eq!(qrmi.task_status("1").await.unwrap(), TaskStatus::Failed);
+    });
+    server.assert_done();
+}
+
+#[test]
+fn native_error_codes_have_actionable_qrmi_kinds() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    for (code, kind) in [
+        ("unsupported_capability", QrmiErrorKind::UnsupportedFunction),
+        ("unsupported_operation", QrmiErrorKind::UnsupportedFunction),
+        ("invalid_config", QrmiErrorKind::InvalidConfig),
+        ("session_not_found", QrmiErrorKind::InvalidConfig),
+        ("invalid_input", QrmiErrorKind::InvalidInput),
+        ("task_not_found", QrmiErrorKind::TaskNotFound),
+    ] {
+        let response = serde_json::json!({"version":2,"ok":false,"error":{"code":code,"message":"review probe"}});
+        let reply = format!("OK {response}");
+        let server = Server::new(&[(
+            r#"API {"version":2,"command":"logs","session_id":4,"task_id":8}"#,
+            &reply,
+        )]);
+        let mut qrmi = resource(Some(4));
+        let error = block_on(qrmi.task_logs("8")).unwrap_err();
+        assert_eq!(error.kind(), kind, "{code}");
+        assert!(error.to_string().contains("review probe"));
+        server.assert_done();
+    }
+}
+
+#[test]
+fn resource_retains_negotiation_across_native_submissions() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let request = r#"{"schema_version":2,"operation":"execute"}"#;
+    let submit =
+        format!(r#"API {{"version":2,"command":"submit","session_id":4,"request":{request}}}"#);
+    let server = Server::new(&[
+        (
+            r#"API {"version":2,"command":"capabilities"}"#,
+            r#"OK {"version":2,"ok":true,"native":{"schema_version":2}}"#,
+        ),
+        (&submit, r#"OK {"version":2,"ok":true,"task_id":1}"#),
+        (&submit, r#"OK {"version":2,"ok":true,"task_id":2}"#),
+    ]);
+    let mut qrmi = resource(Some(4));
+    for task in ["1", "2"] {
+        assert_eq!(
+            block_on(qrmi.task_start(request_payload(request.into()))).unwrap(),
+            task
+        );
+    }
+    server.assert_done();
+}
+
+#[test]
+fn resource_keeps_one_socket_and_native_submission_clears_reused_status() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let input = r#"{"schema_version":2,"operation":"execute"}"#;
+    let submit = format!(
+        "API {{\"version\":2,\"command\":\"submit\",\"session_id\":5,\"request\":{input}}}"
+    );
+    let original = Server::new(&[
+        ("PING", "OK"),
+        ("SESSION CREATE", "OK 5"),
+        (
+            "API {\"version\":2,\"command\":\"capabilities\"}",
+            "OK {\"version\":2,\"ok\":true,\"native\":{\"schema_version\":2}}",
+        ),
+        (&submit, "OK {\"version\":2,\"ok\":true,\"task_id\":7}"),
+        ("SESSION 5 TASK 7 EXISTS", "OK YES"),
+        ("SESSION 5 TASK 7 FAILED", "OK NO"),
+        ("SESSION 5 TASK 7 FINISHED", "OK NO"),
+        ("SESSION 5 TASK 7 RUNNING", "OK YES"),
+        (
+            "API {\"version\":2,\"command\":\"logs\",\"session_id\":5,\"task_id\":7}",
+            "OK {\"version\":2,\"ok\":true,\"logs\":\"captured\"}",
+        ),
+        ("SESSION 5 TASK 7 EXISTS", "OK YES"),
+        ("SESSION 5 TASK 7 FAILED", "OK NO"),
+        ("SESSION 5 TASK 7 FINISHED", "OK NO"),
+        ("SESSION 5 TASK 7 RUNNING", "OK YES"),
+        ("SESSION 5 TASK 7 CANCEL", "OK YES"),
+        (&submit, "OK {\"version\":2,\"ok\":true,\"task_id\":7}"),
+        ("SESSION 5 TASK 7 EXISTS", "OK YES"),
+        ("SESSION 5 TASK 7 FAILED", "OK NO"),
+        ("SESSION 5 TASK 7 FINISHED", "OK YES"),
+        ("SESSION 5 TASK 7 FAILED", "OK NO"),
+        ("SESSION 5 TASK 7 EXISTS", "OK YES"),
+        ("SESSION 5 TASK 7 GET_RESULTS", "OK {\"counts\":{\"0\":1}}"),
+        ("SESSION 5 DELETE", "OK YES"),
+    ]);
+    let mut qrmi = resource(None);
+    let other = Server::new(&[]); // Changes the process-wide socket environment.
+    assert!(block_on(qrmi.is_accessible()).unwrap());
+    let token = block_on(qrmi.acquire()).unwrap();
+    block_on(qrmi.target()).unwrap();
+    qrmi.terminal_tasks.insert((5, 7), TaskStatus::Completed);
+    assert_eq!(
+        block_on(qrmi.task_start(request_payload(input.into()))).unwrap(),
+        "7"
+    );
+    assert_eq!(
+        block_on(qrmi.task_status("7")).unwrap(),
+        TaskStatus::Running
+    );
+    assert!(block_on(qrmi.task_logs("7")).unwrap().contains("captured"));
+    block_on(qrmi.task_stop("7")).unwrap();
+    assert_eq!(
+        block_on(qrmi.task_start(request_payload(input.into()))).unwrap(),
+        "7"
+    );
+    assert!(block_on(qrmi.task_result("7"))
+        .unwrap()
+        .value
+        .contains("counts"));
+    block_on(qrmi.release(&token)).unwrap();
+    original.assert_done();
+    other.assert_done();
 }
