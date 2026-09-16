@@ -93,7 +93,7 @@ for more details.
 
 The `native-*.json` examples use the new schema-2 native API. They require the
 updated Maestro library, native server, and QRMI. Both task runners accept these
-files directly. See [the native API guide](../../../docs/maestro-native-api.md)
+files directly. See [the native API guide](../../../docs/maestro-native-api.rst)
 for noise semantics, query batches, GPU prerequisites, and MPI profile setup.
 Legacy integer simulator IDs above depend on the Maestro build; query `target()`
 for the actual mapping, or use symbolic names in native requests.

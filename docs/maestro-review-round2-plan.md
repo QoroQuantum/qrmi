@@ -127,6 +127,6 @@ The Python suite used an isolated package containing the rebuilt QRMI extension
 under `/tmp/maestro-review-fixes/python-package`. Temporary test data and external
 project patches are under `/tmp/maestro-review-round2`.
 
-Updated usage and test instructions are in [the QRMI native API guide](maestro-native-api.md),
+Updated usage and test instructions are in [the QRMI native API guide](maestro-native-api.rst),
 Maestro's `docs/native-request-api.md`, and the server's `docs/native-api-v2.md`.
 The original `review.md`, unrelated edits and Maestro's `build.sh` were preserved.

@@ -458,35 +458,66 @@ fn rejected_submission_is_classified_and_cleaned_up() {
 #[test]
 fn cancellation_acknowledgement_is_required_and_success_is_remembered() {
     let _lock = ENV_LOCK.lock().unwrap();
-    let active = [
-        ("SESSION 8 TASK 1 EXISTS", "OK YES"),
-        ("SESSION 8 TASK 1 FAILED", "OK NO"),
-        ("SESSION 8 TASK 1 FINISHED", "OK NO"),
-        ("SESSION 8 TASK 1 RUNNING", "OK YES"),
-    ];
-    let mut replies = active.to_vec();
-    replies.push(("SESSION 8 TASK 1 CANCEL", "OK NO"));
-    replies.extend(active);
-    replies.extend(active);
-    replies.push(("SESSION 8 TASK 1 CANCEL", "OK YES"));
-    let server = Server::new(&replies);
-    block_on(async {
-        let mut qrmi = resource(Some(8));
-        assert!(qrmi
-            .task_stop("1")
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("refused to cancel active task"));
-        qrmi.task_stop("1").await.unwrap();
-        assert_eq!(qrmi.task_status("1").await.unwrap(), TaskStatus::Cancelled);
-        qrmi.task_stop("1").await.unwrap();
-        assert_eq!(
-            qrmi.task_result("1").await.unwrap_err().kind(),
-            QrmiErrorKind::TaskNotReady
-        );
-    });
-    server.assert_done();
+    for running in ["OK NO", "OK YES"] {
+        let active = [
+            ("SESSION 8 TASK 1 EXISTS", "OK YES"),
+            ("SESSION 8 TASK 1 FAILED", "OK NO"),
+            ("SESSION 8 TASK 1 FINISHED", "OK NO"),
+            ("SESSION 8 TASK 1 RUNNING", running),
+        ];
+        let mut replies = active.to_vec();
+        replies.push(("SESSION 8 TASK 1 CANCEL", "OK NO"));
+        replies.extend(active);
+        replies.extend(active);
+        replies.push(("SESSION 8 TASK 1 CANCEL", "OK YES"));
+        let server = Server::new(&replies);
+        block_on(async {
+            let mut qrmi = resource(Some(8));
+            assert!(qrmi
+                .task_stop("1")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("refused to cancel active task"));
+            qrmi.task_stop("1").await.unwrap();
+            assert_eq!(qrmi.task_status("1").await.unwrap(), TaskStatus::Cancelled);
+            qrmi.task_stop("1").await.unwrap();
+            assert_eq!(
+                qrmi.task_result("1").await.unwrap_err().kind(),
+                QrmiErrorKind::TaskNotReady
+            );
+        });
+        server.assert_done();
+    }
+}
+
+#[test]
+fn cancellation_errors_preserve_queued_and_running_tasks() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    for (running, status) in [
+        ("OK NO", TaskStatus::Queued),
+        ("OK YES", TaskStatus::Running),
+    ] {
+        let active = [
+            ("SESSION 8 TASK 1 EXISTS", "OK YES"),
+            ("SESSION 8 TASK 1 FAILED", "OK NO"),
+            ("SESSION 8 TASK 1 FINISHED", "OK NO"),
+            ("SESSION 8 TASK 1 RUNNING", running),
+        ];
+        let mut replies = active.to_vec();
+        replies.push(("SESSION 8 TASK 1 CANCEL", "ERROR worker cleanup failed"));
+        replies.extend(active);
+        replies.extend(active);
+        let server = Server::new(&replies);
+        block_on(async {
+            let mut qrmi = resource(Some(8));
+            let error = qrmi.task_stop("1").await.unwrap_err();
+            assert_eq!(error.kind(), QrmiErrorKind::Other);
+            assert!(error.to_string().contains("worker cleanup failed"));
+            assert_eq!(qrmi.task_status("1").await.unwrap(), status);
+        });
+        server.assert_done();
+    }
 }
 
 #[test]

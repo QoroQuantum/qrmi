@@ -89,7 +89,7 @@ Server reference: `/home/adrian/slurm/maestro-local-server/docs/native-api-v2.md
   FAILED and FINISHED queries and be cached as Completed.
 - Added Rust, Python, C binding, mock transport and opt-in native integration tests.
 
-User guide: [maestro-native-api.md](maestro-native-api.md).
+User guide: [maestro-native-api.rst](maestro-native-api.rst).
 
 ## Verification performed
 
@@ -173,6 +173,6 @@ MAESTRO_LIBRARY_DIR=BUILD CARGO_TARGET_DIR=SERVER_BUILD cargo test --offline
 
 Set the matching runtime library search path, run from the server repository,
 and allow temporary Unix sockets. QRMI unit and opt-in integration commands are
-listed in [the user guide](maestro-native-api.md). Set
+listed in [the user guide](maestro-native-api.rst). Set
 `QRMI_TEST_DISTRIBUTED_GPU=1` for the real local GPU integration test;
 `QRMI_TEST_MPI_PROFILE` names the administrator-owned test launch profile.

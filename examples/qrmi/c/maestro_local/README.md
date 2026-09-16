@@ -16,7 +16,7 @@ set before constructing that resource.
 
 Maestro is also available through `QRMIService`. Logs and target information
 currently report an explicit unsupported-operation error. See the
-[Maestro migration notes](../../../../docs/migration/maestro-0.24.md) for discovery,
+[Maestro migration notes](../../../../docs/migration/maestro-0.24.rst) for discovery,
 error handling and rebuilding bindings after an upstream merge.
 
 Where `<backend_name>` is the backend name passed as the first argument (e.g. `MAESTRO_LOCAL`).

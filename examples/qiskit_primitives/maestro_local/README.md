@@ -27,7 +27,7 @@ The socket defaults to `/run/maestro.sock`; `QRMI_MAESTRO_SOCKET` overrides it.
 set `<backend_name>_QRMI_JOB_ACQUISITION_TOKEN` before constructing the resource.
 The examples export their acquired token for that purpose.
 
-See the [Maestro migration notes](../../../docs/migration/maestro-0.24.md) for
+See the [Maestro migration notes](../../../docs/migration/maestro-0.24.rst) for
 classified errors, unsupported logs/target data and required rebuilds.
 
 ## How it works

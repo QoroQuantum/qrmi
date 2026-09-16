@@ -1,6 +1,6 @@
 # Exposing Maestro capabilities through QRMI
 
-> This report records the pre-implementation source analysis. The approved changes and validation results are now recorded in [the implementation plan](maestro-implementation-plan.md); usage is documented in [the native API guide](maestro-native-api.md). Source line references below describe the original snapshot.
+> This report records the pre-implementation source analysis. The approved changes and validation results are now recorded in [the implementation plan](maestro-implementation-plan.md); usage is documented in [the native API guide](maestro-native-api.rst). Source line references below describe the original snapshot.
 
 Analysis date: 2026-09-16. This is an implementation proposal based on source inspection, not a record of implemented or tested changes.
 

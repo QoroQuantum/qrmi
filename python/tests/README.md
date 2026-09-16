@@ -59,7 +59,7 @@ Contributors are encouraged to:
 The tests in `unit/quantum_resource/test_maestro_local.py` run a scripted local
 Unix socket server and require the rebuilt Python extension, but no Maestro daemon.
 Set `QRMI_TEST_LIBRARY` to the rebuilt `libqrmi.so` to include C ABI/error/discovery
-checks. See the [Maestro regression instructions](../../docs/migration/maestro-0.24.md#regression-tests).
+checks. See the [Maestro regression instructions](../../docs/migration/maestro-0.24.rst#regression-tests).
 
 To test against a running Maestro server, opt in explicitly:
 

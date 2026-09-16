@@ -1,0 +1,9 @@
+features:
+  - |
+    Maestro Local's native request and migration guides are included in the
+    Sphinx documentation, with downloadable noise, state query, checkpoint,
+    incremental evolution and distributed GPU examples.
+fixes:
+  - |
+    Documentation source links now target this fork and skip objects outside
+    the checkout, allowing API documentation to build against installed wheels.
