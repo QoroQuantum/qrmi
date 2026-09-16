@@ -1,6 +1,7 @@
 use crate::maestro_lib;
 use json;
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug)]
 pub enum TaskType {
@@ -21,7 +22,11 @@ pub struct Session {
 
 impl Session {
     pub fn new() -> Result<Self, String> {
-        let res = maestro_lib::send_command_close("SESSION CREATE\n");
+        Self::new_at(&maestro_lib::socket_path())
+    }
+
+    pub fn new_at(socket: &Path) -> Result<Self, String> {
+        let res = maestro_lib::send_command_at(socket, "SESSION CREATE\n");
         match res {
             maestro_lib::Response::OkResponse(id_str) => {
                 if let Ok(id) = id_str.parse::<u32>() {
@@ -43,8 +48,12 @@ impl Session {
     }
 
     pub async fn session_exists(session_id: u32) -> Result<bool, String> {
+        Self::session_exists_at(session_id, &maestro_lib::socket_path()).await
+    }
+
+    pub async fn session_exists_at(session_id: u32, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} EXISTS\n", session_id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(exists) => Ok(exists),
             maestro_lib::Response::ERROR(err) => {
@@ -55,8 +64,12 @@ impl Session {
     }
 
     pub async fn delete(&self) -> Result<bool, String> {
+        self.delete_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn delete_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} DELETE\n", self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(val) => Ok(val),
             maestro_lib::Response::ERROR(err) => Err(format!("Failed to delete session: {}", err)),
@@ -65,8 +78,13 @@ impl Session {
     }
 
     pub async fn task_exists(&self, task_id: u32) -> Result<bool, String> {
+        self.task_exists_at(task_id, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn task_exists_at(&self, task_id: u32, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} EXISTS\n", self.id, task_id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(exists) => Ok(exists),
             maestro_lib::Response::ERROR(err) => {
@@ -77,8 +95,12 @@ impl Session {
     }
 
     pub async fn create_task(&self) -> Result<Task, String> {
+        self.create_task_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn create_task_at(&self, socket: &Path) -> Result<Task, String> {
         let command = format!("SESSION {} TASK CREATE\n", self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OkResponse(id_str) => {
                 if let Ok(id) = id_str.parse::<u32>() {
@@ -165,8 +187,12 @@ impl Task {
     }
 
     pub async fn exists(&self) -> Result<bool, String> {
+        self.exists_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn exists_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} EXISTS\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(exists) => Ok(exists),
             maestro_lib::Response::ERROR(err) => {
@@ -177,8 +203,12 @@ impl Task {
     }
 
     pub async fn valid(&self) -> Result<bool, String> {
+        self.valid_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn valid_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} VALID\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(valid) => Ok(valid),
             maestro_lib::Response::ERROR(err) => {
@@ -189,8 +219,12 @@ impl Task {
     }
 
     pub async fn pending(&self) -> Result<bool, String> {
+        self.pending_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn pending_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} PENDING\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(pending) => Ok(pending),
             maestro_lib::Response::ERROR(err) => {
@@ -201,8 +235,12 @@ impl Task {
     }
 
     pub async fn running(&self) -> Result<bool, String> {
+        self.running_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn running_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} RUNNING\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(running) => Ok(running),
             maestro_lib::Response::ERROR(err) => {
@@ -213,8 +251,12 @@ impl Task {
     }
 
     pub async fn finished(&self) -> Result<bool, String> {
+        self.finished_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn finished_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} FINISHED\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(finished) => Ok(finished),
             maestro_lib::Response::ERROR(err) => {
@@ -225,8 +267,12 @@ impl Task {
     }
 
     pub async fn failed(&self) -> Result<bool, String> {
+        self.failed_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn failed_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} FAILED\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(failed) => Ok(failed),
             maestro_lib::Response::ERROR(err) => {
@@ -237,8 +283,12 @@ impl Task {
     }
 
     pub async fn execute(&self) -> Result<bool, String> {
+        self.execute_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn execute_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} EXECUTE\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(executed) => Ok(executed),
             maestro_lib::Response::ERROR(err) => Err(format!("Failed to execute task: {}", err)),
@@ -247,8 +297,12 @@ impl Task {
     }
 
     pub async fn cancel(&self) -> Result<bool, String> {
+        self.cancel_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn cancel_at(&self, socket: &Path) -> Result<bool, String> {
         let command = format!("SESSION {} TASK {} CANCEL\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(canceled) => Ok(canceled),
             maestro_lib::Response::ERROR(err) => Err(format!("Failed to cancel task: {}", err)),
@@ -291,8 +345,13 @@ impl Task {
     }
 
     pub async fn get_results_as_string(&self) -> Result<String, String> {
+        self.get_results_as_string_at(&maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn get_results_as_string_at(&self, socket: &Path) -> Result<String, String> {
         let command = format!("SESSION {} TASK {} GET_RESULTS\n", self.session_id, self.id);
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OkResponse(results) => Ok(results),
             maestro_lib::Response::ERROR(err) => {
@@ -303,7 +362,11 @@ impl Task {
     }
 
     pub async fn get_results(&self) -> Result<TaskResult, String> {
-        let results = self.get_results_as_string().await;
+        self.get_results_at(&maestro_lib::socket_path()).await
+    }
+
+    pub async fn get_results_at(&self, socket: &Path) -> Result<TaskResult, String> {
+        let results = self.get_results_as_string_at(socket).await;
 
         if let Ok(result) = results {
             Ok(self.get_task_results_from_string(result))
@@ -316,6 +379,11 @@ impl Task {
     }
 
     pub async fn set_type(&self, task_type: TaskType) -> Result<bool, String> {
+        self.set_type_at(task_type, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_type_at(&self, task_type: TaskType, socket: &Path) -> Result<bool, String> {
         let type_str = match task_type {
             TaskType::EXECUTE => "EXECUTE",
             TaskType::ESTIMATE => "ESTIMATE",
@@ -324,7 +392,7 @@ impl Task {
             "SESSION {} TASK {} SET_TYPE {}\n",
             self.session_id, self.id, type_str
         );
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(set) => Ok(set),
             maestro_lib::Response::ERROR(err) => Err(format!("Failed to set task type: {}", err)),
@@ -333,11 +401,16 @@ impl Task {
     }
 
     pub async fn set_qubits(&self, qubits: u32) -> Result<bool, String> {
+        self.set_qubits_at(qubits, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_qubits_at(&self, qubits: u32, socket: &Path) -> Result<bool, String> {
         let command = format!(
             "SESSION {} TASK {} SET_QUBITS {}\n",
             self.session_id, self.id, qubits
         );
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(set) => Ok(set),
             maestro_lib::Response::ERROR(err) => Err(format!("Failed to set task qubits: {}", err)),
@@ -346,11 +419,20 @@ impl Task {
     }
 
     pub async fn set_simulator_type(&self, simulator_type: u32) -> Result<bool, String> {
+        self.set_simulator_type_at(simulator_type, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_simulator_type_at(
+        &self,
+        simulator_type: u32,
+        socket: &Path,
+    ) -> Result<bool, String> {
         let command = format!(
             "SESSION {} TASK {} SET_SIM_TYPE {}\n",
             self.session_id, self.id, simulator_type
         );
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(set) => Ok(set),
             maestro_lib::Response::ERROR(err) => {
@@ -361,11 +443,20 @@ impl Task {
     }
 
     pub async fn set_simulation_method(&self, method: u32) -> Result<bool, String> {
+        self.set_simulation_method_at(method, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_simulation_method_at(
+        &self,
+        method: u32,
+        socket: &Path,
+    ) -> Result<bool, String> {
         let command = format!(
             "SESSION {} TASK {} SET_METHOD {}\n",
             self.session_id, self.id, method
         );
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(set) => Ok(set),
             maestro_lib::Response::ERROR(err) => {
@@ -376,6 +467,15 @@ impl Task {
     }
 
     pub async fn set_observables_as_string(&self, observables: String) -> Result<bool, String> {
+        self.set_observables_as_string_at(observables, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_observables_as_string_at(
+        &self,
+        observables: String,
+        socket: &Path,
+    ) -> Result<bool, String> {
         // SET_OBSERVABLES is sent over a line-based socket protocol, so any
         // embedded newlines must be collapsed rather than merely trimmed from
         // the ends, or the command gets truncated at the first newline.
@@ -386,7 +486,7 @@ impl Task {
             "SESSION {} TASK {} SET_OBSERVABLES {}\n",
             self.session_id, self.id, observables_trimmed
         );
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(set) => Ok(set),
             maestro_lib::Response::ERROR(err) => {
@@ -397,11 +497,26 @@ impl Task {
     }
 
     pub async fn set_observables(&self, observables: Vec<String>) -> Result<bool, String> {
+        self.set_observables_at(observables, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_observables_at(
+        &self,
+        observables: Vec<String>,
+        socket: &Path,
+    ) -> Result<bool, String> {
         let observables_str = observables.join(";");
-        return self.set_observables_as_string(observables_str).await;
+        return self
+            .set_observables_as_string_at(observables_str, socket)
+            .await;
     }
 
     pub async fn set_qasm(&self, qasm: String) -> Result<bool, String> {
+        self.set_qasm_at(qasm, &maestro_lib::socket_path()).await
+    }
+
+    pub async fn set_qasm_at(&self, qasm: String, socket: &Path) -> Result<bool, String> {
         // SET_QASM is sent over a line-based socket protocol. QASM generated by
         // tools like Qiskit's qasm2.dumps() is multi-line, so embedded newlines
         // must be collapsed to spaces (statements are ';'-terminated, so this is
@@ -413,7 +528,7 @@ impl Task {
             "SESSION {} TASK {} SET_QASM {}\n",
             self.session_id, self.id, qasm_trimmed
         );
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(set) => Ok(set),
             maestro_lib::Response::ERROR(err) => Err(format!("Failed to set task QASM: {}", err)),
@@ -422,6 +537,15 @@ impl Task {
     }
 
     pub async fn set_options_json(&self, options: String) -> Result<bool, String> {
+        self.set_options_json_at(options, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_options_json_at(
+        &self,
+        options: String,
+        socket: &Path,
+    ) -> Result<bool, String> {
         // SET_OPTIONS is sent over a line-based socket protocol, so any
         // embedded newlines (e.g. from pretty-printed JSON) must be collapsed
         // rather than merely trimmed from the ends, or the command gets
@@ -432,7 +556,7 @@ impl Task {
             "SESSION {} TASK {} SET_OPTIONS {}\n",
             self.session_id, self.id, options_trimmed
         );
-        let res = maestro_lib::send_command_close(&command);
+        let res = maestro_lib::send_command_at(socket, &command);
         match res {
             maestro_lib::Response::OK(set) => Ok(set),
             maestro_lib::Response::ERROR(err) => {
@@ -443,8 +567,13 @@ impl Task {
     }
 
     pub async fn set_options(&self, options: TaskConfig) -> Result<bool, String> {
+        self.set_options_at(options, &maestro_lib::socket_path())
+            .await
+    }
+
+    pub async fn set_options_at(&self, options: TaskConfig, socket: &Path) -> Result<bool, String> {
         let json_str = options.get_json();
 
-        self.set_options_json(json_str).await
+        self.set_options_json_at(json_str, socket).await
     }
 }

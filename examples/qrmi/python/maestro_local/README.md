@@ -16,10 +16,16 @@ $ pip install -r ../requirements.txt
 
 ## Environment variables
 
-Maestro Local connects to a fixed local Unix socket, so no endpoint/token environment
-variables are required. The QRMI wrapper only reads (and this example writes)
-`<backend_name>_QRMI_JOB_ACQUISITION_TOKEN`, which holds the session ID returned by
-`acquire()`.
+Maestro Local connects to `/run/maestro.sock` by default. Set the optional
+`QRMI_MAESTRO_SOCKET` variable to use another socket. The resource retains the
+session returned by `acquire()`; `<backend_name>_QRMI_JOB_ACQUISITION_TOKEN` is only
+needed to reuse a session in another resource instance or process, and must be
+set before constructing that resource.
+
+Maestro is also available through `QRMIService`. Logs and target information
+currently report an explicit unsupported-operation error. See the
+[Maestro migration notes](../../../../docs/migration/maestro-0.24.rst) for discovery,
+error handling and rebuilding bindings after an upstream merge.
 
 Where `<backend_name>` is the backend name passed via `--backend` (e.g. `MAESTRO_LOCAL`).
 

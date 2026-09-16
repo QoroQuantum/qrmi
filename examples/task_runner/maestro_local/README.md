@@ -81,9 +81,56 @@ Both tools write a single JSON file matching the `maestro-local` entry of the
 ```shell-session
 export QRMI_JOB_QPU_RESOURCES=MAESTRO_LOCAL
 export QRMI_JOB_QPU_TYPES=maestro-local
+export MAESTRO_LOCAL_QRMI_JOB_ACQUISITION_TOKEN=<existing session ID>
 
 task_runner MAESTRO_LOCAL sampler_input.json
 ```
 
 See the [task_runner documentation](../../../python/qrmi/tools/task_runner/README.md)
 for more details.
+
+## Native request API
+
+The `native-*.json` examples use the new schema-2 native API. They require the
+updated Maestro library, native server, and QRMI. Both task runners accept these
+files directly. See [the native API guide](../../../docs/maestro-native-api.rst)
+for noise semantics, query batches, GPU prerequisites, and MPI profile setup.
+Legacy integer simulator IDs above depend on the Maestro build; query `target()`
+for the actual mapping, or use symbolic names in native requests.
+
+| Example | What it demonstrates | Expected result / prerequisites |
+|---|---|---|
+| [native-noise.json](native-noise.json) | Exact T1 damping and estimation | Expectations `[0.8, 0.36]` on CPU. |
+| [native-query.json](native-query.json) | Independent amplitude and mixed-state diagnostic queries | Selected amplitudes `[1, 0]`, purity `0.8848`. |
+| [native-thermal-idle.json](native-thermal-idle.json) | Thermal gate relaxation plus delay relaxation and detuning | Exact density-matrix expectations; durations are seconds, detuning is Hz. |
+| [native-correlated-noise.json](native-correlated-noise.json) | Correlated OU phase noise with 128 seeded realizations, MPS options | Repeatable estimates within the same runtime; reported standard errors describe realization variation. |
+| [native-checkpoint.json](native-checkpoint.json) | Save an ideal prefix and run two noisy suffixes | Both suffixes return `{"1":32}`; the prefix receives no noise. |
+| [native-incremental.json](native-incremental.json) | Prepare once and apply an exact amplitude-damping Kraus step repeatedly | Z expectations `[-1, -0.5, -0.125, 0.3671875]` at steps `[0,1,2,4]`. |
+| [native-distributed-gpu.json](native-distributed-gpu.json) | Local statevector distribution | Two physical GPU ordinals plus the plugin, runtime and license. |
+| [native-mpi-gpu.json](native-mpi-gpu.json) | MPI GPU statevector distribution | Configure the named server profile, rank-local GPU binding, MPI plugin/license and CUDA-aware MPI. |
+
+Native estimators and queries omit `execution.shots`; only `execute` and
+`checkpoint_batch` accept it. Checkpoint suffixes are circuit objects and cannot
+contain `launch` or their own simulator configuration. Noise seeds apply to the
+complete ordered checkpoint request, so reordering suffixes can change samples.
+The incremental example uses a Kraus channel with damping probability 0.25 per
+step, including the skipped intermediate step when advancing from step 2 to 4.
+
+With the existing session environment shown above, run a CPU example using either
+task runner:
+
+```sh
+task_runner MAESTRO_LOCAL native-thermal-idle.json
+task_runner MAESTRO_LOCAL native-incremental.json
+```
+
+From this directory, standalone native validation is also available for CPU files:
+
+```sh
+maestro-request --validate < native-checkpoint.json
+```
+
+The MPI example's `launch` field is interpreted by the local server and is rejected
+by the standalone CLI. Tests validate all eight computational documents and run
+the six CPU examples through a private native server with result assertions. GPU
+validation does not establish device, allocation or license availability.

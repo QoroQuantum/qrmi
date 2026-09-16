@@ -12,7 +12,9 @@
 
 use clap::Parser;
 use dotenv::dotenv;
-use qrmi::{maestro::MaestroLocal, models::Payload, models::TaskStatus, QuantumResource};
+use qrmi::{
+    maestro::MaestroLocal, models::Payload, models::TaskStatus, QrmiError, QuantumResource,
+};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
@@ -62,7 +64,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     dotenv().ok();
-    println!("{}", dotenv().unwrap().display());
 
     let mut qrmi = MaestroLocal::new(&args.backend)?;
     println!(
@@ -85,9 +86,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("{:#?}", qrmi.metadata().await);
 
-    let target = qrmi.target().await;
-    if let Ok(v) = target {
-        println!("{}", v.value);
+    match qrmi.target().await {
+        Ok(target) => println!("{}", target.value),
+        Err(QrmiError::UnsupportedFunction(_)) => {
+            println!("Target information is unavailable for Maestro Local")
+        }
+        Err(error) => return Err(error.into()),
     }
 
     let f = File::open(args.input).expect("file not found");
@@ -115,7 +119,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", qrmi.task_result(&job_id).await?.value);
             break;
         } else if matches!(status, TaskStatus::Failed | TaskStatus::Cancelled) {
-            println!("{}", qrmi.task_logs(&job_id).await?);
+            match qrmi.task_logs(&job_id).await {
+                Ok(logs) => println!("{logs}"),
+                Err(QrmiError::UnsupportedFunction(_)) => {
+                    println!("Task logs are unavailable for Maestro Local")
+                }
+                Err(error) => return Err(error.into()),
+            }
             break;
         }
         thread::sleep(one_sec);

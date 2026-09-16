@@ -1,0 +1,35 @@
+features:
+  - |
+    Maestro Local accepts schema-version-2 native requests through the existing
+    payload with ``job_type="request"``. Requests expose symbolic simulator
+    selection, simulator options, noise models, state queries, incremental
+    evolution, checkpoint suffix batches, and independent request batches.
+    Supported GPU plugins can perform local or MPI-distributed statevector
+    simulation; MPI launches use administrator-configured server profiles.
+  - |
+    Compatible Maestro servers expose their capability catalog through
+    ``target()`` and retained task diagnostics through ``task_logs()``.
+    Diagnostics include bounded worker output and structured native errors,
+    including earlier failures when worker cleanup also fails.
+  - |
+    The Python ``qrmi.maestro`` helpers and both task runners accept native
+    requests alongside legacy execute/estimate payloads. Examples cover exact
+    and sampled noise, state queries, checkpoint and incremental operations,
+    and local and MPI GPU distribution.
+upgrade:
+  - |
+    Rebuild Maestro, maestro-local-server, and QRMI together to use the native
+    request API. Existing Maestro payload fields and the C ABI layout are
+    unchanged. Older servers retain legacy execution support and report
+    unsupported native API operations explicitly.
+  - |
+    Poll running tasks, retrieve their logs, or use the bundled Rust client's
+    ``keepalive`` before the server's advertised session lease expires. QRMI
+    does not send a background heartbeat. Logs remain available after result
+    consumption until the session is deleted or expires.
+fixes:
+  - |
+    The Python and Rust task runners validate Maestro input consistently,
+    retrieve available diagnostics on failure, and exit unsuccessfully when
+    task execution, result retrieval, or output writing fails. Native request
+    validation and launch errors retain their QRMI error categories.

@@ -18,7 +18,13 @@ import argparse
 import os
 import time
 
-from qrmi import Payload, QuantumResource, ResourceType, TaskStatus
+from qrmi import (
+    Payload,
+    QuantumResource,
+    ResourceType,
+    TaskStatus,
+    UnsupportedFunctionError,
+)
 
 parser = argparse.ArgumentParser(description="An example of Maestro Local QRMI")
 parser.add_argument("--backend", required=True, help="Backend name (device identifier)")
@@ -53,7 +59,7 @@ print(f"Selected resource: id={qrmi.resource_id()} type={str(qrmi.resource_type(
 
 # Check if QR is accessible
 is_avail = qrmi.is_accessible()
-print("Maestro Local QR is %s accessible" % ("" if is_avail else "not"))
+print(f"Maestro Local QR is {'' if is_avail else 'not '}accessible")
 
 # Get a session
 session = qrmi.acquire()
@@ -63,8 +69,11 @@ print("Maestro Local session ID:", session)
 print(qrmi.metadata())
 
 # Get target
-target = qrmi.target()
-print("QR Target %s" % target.value)
+try:
+    target = qrmi.target()
+    print(f"QR Target {target.value}")
+except UnsupportedFunctionError:
+    print("Target information is unavailable for Maestro Local")
 
 task_id = qrmi.task_start(
     Payload.MaestroLocal(
@@ -77,22 +86,24 @@ task_id = qrmi.task_start(
         config=args.config,
     )
 )
-print("Task ID: %s" % task_id)
+print(f"Task ID: {task_id}")
 
 # Wait for completion
 while True:
     status = qrmi.task_status(task_id)
     if status == TaskStatus.Completed:
         print("Task completed")
-        print("Results: %s" % qrmi.task_result(task_id).value)
+        print(f"Results: {qrmi.task_result(task_id).value}")
         break
-    elif status in (TaskStatus.Failed, TaskStatus.Cancelled):
-        print("Task ended with status %s" % status)
-        print(qrmi.task_logs(task_id))
+    if status in (TaskStatus.Failed, TaskStatus.Cancelled):
+        print(f"Task ended with status {status}")
+        try:
+            print(qrmi.task_logs(task_id))
+        except UnsupportedFunctionError:
+            print("Task logs are unavailable for Maestro Local")
         break
-    else:
-        print("Task status %s, waiting 1s" % status)
-        time.sleep(1)
+    print(f"Task status {status}, waiting 1s")
+    time.sleep(1)
 
 qrmi.task_stop(task_id)
 

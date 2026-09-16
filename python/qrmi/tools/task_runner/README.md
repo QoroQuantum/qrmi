@@ -7,7 +7,7 @@ This executable receives SIGCONT/SIGTERM signals sent by Slurm infrastructure an
 ## Prerequisites
 
 * Python 3.11, 3.12 or 3.13
-* [QRMI Python package](../../../../INSTALL.md#how-to-build--install-qrmi-python-package) is installed on your python virtual environment. This document assumes your python virtual environment is created under `~/py312_qrmi_venv` directory.
+* [QRMI Python package](https://qiskit-community.github.io/qrmi/development/INSTALLATION.html#installing-from-source) is installed on your Python virtual environment. This document assumes your python virtual environment is created under `~/py312_qrmi_venv` directory.
 
 
 ## How to run
@@ -158,10 +158,10 @@ task_runner test_heron /shared/input/estimator_input.json
 | ---- | ---- |
 | QRMI_JOB_QPU_RESOURCES | Quantum backend name |
 | QRMI_JOB_QPU_TYPES | Should be `ibm-quantum-compute-service` |
-| {backend_name}_QRMI_IBM_QCS_ENDPOINT | Quantum Compute Service endpoint URL(e.g. `https://quantum.cloud.ibm.com/api/v1`) |
-| {backend_name}_QRMI_IBM_QCS_IAM_ENDPOINT | IBM Cloud IAM endpoint URL(e.g. `https://iam.cloud.ibm.com`) |
+| {backend_name}_QRMI_IBM_QCS_ENDPOINT | IBM Quantum Compute Service endpoint (e.g. `https://quantum.cloud.ibm.com/api/v1`) |
+| {backend_name}_QRMI_IBM_QCS_IAM_ENDPOINT | IBM Cloud IAM endpoint URL (e.g. `https://iam.cloud.ibm.com`) |
 | {backend_name}_QRMI_IBM_QCS_IAM_APIKEY | IBM Cloud IAM API Key |
-| {backend_name}_QRMI_IBM_QCS_SERVICE_CRN | Cloud Resource Name(CRN) of the provisioned Quantum Compute Service instance, starting with `crn:v1:`. |
+| {backend_name}_QRMI_IBM_QCS_SERVICE_CRN | Cloud Resource Name (CRN) of the provisioned Quantum Compute Service instance, starting with `crn:v1:`. |
 | {backend_name}_QRMI_IBM_QCS_TIMEOUT_SECONDS | (Optional) Cost of the job as the estimated time it should take to complete (in seconds). Should not exceed the cost of the program, default: `None`. |
 
 Example:
@@ -249,9 +249,10 @@ task_runner ab_emu_1q_lescanne_2020 /shared/input/alice_bob_felis_input.json
 | ---- | ---- |
 | QRMI_JOB_QPU_RESOURCES | Backend name |
 | QRMI_JOB_QPU_TYPES | Should be `maestro-local` |
-| <backend_name>_QRMI_JOB_ACQUISITION_TOKEN | Session ID, as returned by `acquire()`. Maestro Local connects to a fixed local Unix socket (`/run/maestro.sock`), so no endpoint/credential environment variables are required. |
+| <backend_name>_QRMI_JOB_ACQUISITION_TOKEN | Existing session ID, exported before starting the runner. |
+| QRMI_MAESTRO_SOCKET | Optional socket path; defaults to `/run/maestro.sock`. |
 
-Unlike the other resource types, `task_runner` does not acquire a Maestro Local session itself, so the session must already exist and its ID must be exported via `<backend_name>_QRMI_JOB_ACQUISITION_TOKEN` before invoking `task_runner` (in a Slurm job this is normally handled by the SPANK plugin; for local testing, acquire a session first, e.g. via the [Maestro Local QRMI example](../../../../examples/qrmi/python/maestro_local)).
+The Python `task_runner` uses the session assigned to the job; it does not acquire a Maestro Local session itself, so the session must already exist and its ID must be exported via `<backend_name>_QRMI_JOB_ACQUISITION_TOKEN` before invoking `task_runner` (in a Slurm job this is normally handled by the SPANK plugin; for local testing, acquire a session in a separate resource and retain it until the runner finishes; the standalone examples release their sessions when they exit).
 
 Example:
 
@@ -268,3 +269,31 @@ task_runner MAESTRO_LOCAL /shared/input/sampler_input.json
 ## License
 
 [Apache-2.0](../../../../LICENSE.txt)
+
+### Native Maestro requests
+
+Both task runners also accept raw Maestro schema-2 documents and `{ "request": ... }`
+wrappers for configuration, noise, queries and GPU distribution. See the
+[native API guide](../../../../docs/maestro-native-api.rst) and the `native-*.json`
+files in `examples/task_runner/maestro_local`. The assigned session remains required.
+
+
+Both task runners exit nonzero on task failure, cancellation, or failed result
+retrieval/output. Available task diagnostics go to stderr before cleanup. A failed
+log query is reported without replacing the original task failure. Native
+`job_type: "request"` envelopes accept object or serialized JSON `input`, without
+requiring legacy simulator fields.
+
+For legacy Maestro payloads, omitted or null `config` becomes `{}` in both
+runners; objects and serialized configuration strings are also accepted. Job
+types are case-insensitive. The `{ "request": ... }` wrapper accepts no sibling
+fields. Bare native documents reject legacy envelope fields, and all Maestro forms
+reject fields belonging to another backend. The `job_type:"request"` compatibility
+envelope intentionally permits and ignores known legacy fields outside `input`.
+Native configuration belongs inside `input`. Both runners and the schema agree on
+this exception. Missing required Python fields produce descriptive `ValueError`s.
+
+Native `execution.shots` is valid only for `execute` and `checkpoint_batch`.
+Estimation, state queries and incremental evolution use `execution.seed` without
+shots. See the example directory for thermal/idle noise, correlated noise,
+checkpoint and incremental Kraus-channel requests.

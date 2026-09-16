@@ -14,9 +14,6 @@ use std::process::Command;
 
 // For C API bindings
 fn main() {
-    for (key, value) in std::env::vars() {
-        eprintln!("{key}: {value}");
-    }
     // Pull the config from the cbindgen.toml file.
     let config = cbindgen::Config::from_file("cbindgen.toml").unwrap();
 
@@ -32,8 +29,11 @@ fn main() {
         println!("cargo:rustc-link-lib=munge");
     }
 
-    println!("cargo:rerun-if-changed=/src/*");
-    println!("cargo:rerun-if-changed=/build.rs");
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=cbindgen.toml");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/refs");
 
     let git_hash = Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
