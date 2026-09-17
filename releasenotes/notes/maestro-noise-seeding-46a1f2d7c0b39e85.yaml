@@ -1,0 +1,9 @@
+fixes:
+  - |
+    Document and test Maestro's native thermal-noise, measurement-time readout,
+    and seeding behavior through QRMI. Updated Maestro libraries accept sampled
+    thermal relaxation with ``T1 < T2 <= 2*T1`` using effective ``T2 = T1`` and
+    retain the approximation warning in task logs. Readout noise affects
+    classical control at measurement time, and legacy tasks honor
+    ``config.seed``. These behaviors require a Maestro library containing the
+    native noise and seeding fixes.

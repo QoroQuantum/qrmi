@@ -173,6 +173,10 @@ submission. For schema-2 requests, put ``execution.shots`` only on ``execute`` o
 supported. To validate a sampling request, retain its operation and use the native
 validation entry point rather than changing it to ``validate``.
 
+Legacy ``execute`` and ``estimate`` also accept ``config.seed`` as a nonnegative
+JSON integer up to ``2**64 - 1``. Repeating the seed reproduces sampling on the
+same backend/runtime, including when each task runs in a fresh worker.
+
 Both runners retrieve available diagnostics before cleanup on failure/cancellation,
 write those diagnostics to stderr, and exit nonzero. Result retrieval and output writing
 failures also produce nonzero exits. Missing log support does not hide the original
@@ -229,6 +233,26 @@ channels require density-matrix/MPO methods; pure-state sampled noise follows Ma
 existing helper approximations. Distributed GPU engines currently support statevectors.
 Noise results identify approximations; an MPO result is not automatically free of
 truncation error.
+
+For thermal relaxation with ``T1 < T2 <= 2*T1``, sampled execution uses effective
+``T2 = T1``, matching Maestro's Python policy. This includes thermal noise after
+one-qubit/two-qubit gates and during delays. The result lists
+``thermal_T2_clamped_to_T1`` in ``noise.approximations``, and ``task_logs()`` retains
+a warning naming the affected qubits. Exact density-matrix/MPO execution keeps the
+calibrated T2. This requires a Maestro library containing the native thermal-policy
+update.
+
+Native readout rates follow the measured qubit and apply when each measurement
+writes its classical bit, including conditional measurements. Classical control
+sees the noisy result; skipped measurements do not apply noise. Quantum-noise
+insertion follows the shared Python helpers' behavior on unconditional gates and
+delays.
+
+An explicit ``execution.seed`` or ``simulator.options.seed`` controls measurement
+and readout randomness. Otherwise, an explicit ``noise.seed`` also seeds the
+simulator; the default is zero when neither is supplied. ``noise.seed`` drives
+circuit-noise injection independently and defaults to the simulator seed's lower
+32 bits. These changes require an updated Maestro library.
 
 Counts use classical bit 0 first. Pauli strings and target-state strings use qubit 0
 first. Integer amplitude/probability indices use qubit 0 as the least significant bit.

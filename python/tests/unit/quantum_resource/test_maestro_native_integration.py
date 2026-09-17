@@ -22,7 +22,7 @@ from qrmi import (
     ConfigError,
     UnsupportedFunctionError,
 )
-from qrmi.maestro import request_payload
+from qrmi.maestro import payload_from_input, request_payload
 
 EXAMPLES = Path(__file__).resolve().parents[4] / "examples/task_runner/maestro_local"
 
@@ -245,6 +245,154 @@ def test_exact_noise_capabilities_and_retained_logs(native_resource):
     document["simulator"]["options"] = {"unknown_option": True}
     with pytest.raises(InvalidInputError):
         resource.task_start(request_payload(document))
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "statevector",
+        "matrix_product_state",
+        "density_matrix",
+        "matrix_product_operator",
+    ],
+)
+def test_thermal_approximation_matches_python_policy(native_resource, method):
+    """Accept sampled T2>T1 and retain its warning through the native worker."""
+    document = native_request(method=method)
+    document["noise"] = {
+        "realizations": 256,
+        "channels": [
+            {
+                "kind": "thermal_relaxation",
+                "targets": [0],
+                "duration": 0.3,
+                "t1": 1.0,
+                "t2": 1.5,
+            }
+        ],
+    }
+    task = native_resource.task_start(request_payload(document))
+    assert await_task(native_resource, task) == TaskStatus.Completed
+    result = json.loads(native_resource.task_result(task).value)
+    logs = json.loads(native_resource.task_logs(task))["logs"]
+    marker = "thermal_T2_clamped_to_T1"
+    if method in {"statevector", "matrix_product_state"}:
+        assert marker in result["noise"]["approximations"]
+        assert logs.count("effective T2 clamped to T1") == 1
+        assert "circuit qubits [0]" in logs
+        document["noise"]["channels"][0]["t2"] = 1.0
+        clamped_task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, clamped_task) == TaskStatus.Completed
+        clamped = json.loads(native_resource.task_result(clamped_task).value)
+        assert result["expectation_values"] == pytest.approx(
+            clamped["expectation_values"], abs=1e-12
+        )
+        assert marker not in clamped["noise"]["approximations"]
+        assert (
+            "effective T2 clamped to T1"
+            not in json.loads(native_resource.task_logs(clamped_task))["logs"]
+        )
+    else:
+        assert marker not in result["noise"]["approximations"]
+        assert "effective T2 clamped to T1" not in logs
+        assert result["expectation_values"][0] == pytest.approx(math.exp(-0.3 / 1.5))
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "statevector",
+        "matrix_product_state",
+        "density_matrix",
+        "matrix_product_operator",
+    ],
+)
+@pytest.mark.parametrize("operation", ["execute", "checkpoint_batch"])
+def test_readout_controls_native_conditionals(native_resource, method, operation):
+    """Readout follows qubits, reaches classical control, and respects skipped reads."""
+    document = native_request(operation, method)
+    header = "OPENQASM 2.0; qreg q[2]; creg c[4]; "
+    circuit = {
+        "num_qubits": 2,
+        "num_clbits": 4,
+        "source": header
+        + "measure q[0]->c[2]; if(c==4) x q[1]; measure q[1]->c[0]; "
+        + "if(c==5) measure q[0]->c[3];",
+    }
+    document["circuit"] = circuit
+    if operation == "checkpoint_batch":
+        document["circuit"] = {**circuit, "source": header}
+        document["suffixes"] = [circuit]
+    document["noise"] = {
+        "realizations": 1,
+        "channels": [{"kind": "readout", "targets": [0], "probability": 1.0}],
+    }
+    for source, expected in [
+        (circuit["source"], "1011"),
+        (header + "if(c==1) measure q[0]->c[0];", "0000"),
+    ]:
+        circuit["source"] = source
+        task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        result = json.loads(native_resource.task_result(task).value)
+        if operation == "checkpoint_batch":
+            result = result["results"][0]
+        assert result["counts"] == {expected: 16}
+
+
+@pytest.mark.parametrize("method", ["statevector", "density_matrix"])
+@pytest.mark.parametrize("realizations", [1, 128])
+def test_native_readout_uses_execution_seed(native_resource, method, realizations):
+    """Keep seeded readout reproducible and independent of the noise-injection RNG."""
+    document = native_request("execute", method)
+    document["circuit"][
+        "source"
+    ] = "OPENQASM 2.0; qreg q[1]; creg c[1]; measure q[0]->c[0];"
+    document["execution"]["shots"] = 128
+    document["noise"] = {
+        "realizations": realizations,
+        "channels": [{"kind": "readout", "targets": [0], "probability": 0.5}],
+    }
+    counts = []
+    for injection_seed in [11, 11, 23]:
+        document["noise"]["seed"] = injection_seed
+        task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        counts.append(json.loads(native_resource.task_result(task).value)["counts"])
+    assert counts[0] == counts[1] == counts[2]
+    assert sum(counts[0].values()) == 128
+    assert 24 < counts[0].get("0", 0) < 104
+
+
+@pytest.mark.parametrize("method", [0, 1])
+@pytest.mark.parametrize("seed", [0, 123, 2**64 - 1])
+def test_legacy_execute_honors_seed(native_resource, method, seed):
+    """Carry the full legacy integer seed through QRMI and fresh native workers."""
+    capabilities = json.loads(native_resource.target().value)["native"]
+    backend = next(
+        item["legacy_id"]
+        for item in capabilities["backends"]
+        if item["name"] == "qcsim"
+    )
+    counts = []
+    for value in [seed, seed, seed ^ 1]:
+        payload = payload_from_input(
+            {
+                "job_type": "execute",
+                "input": "OPENQASM 2.0; qreg q[2]; creg c[2]; "
+                "h q[0]; h q[1]; measure q->c;",
+                "qubits": 2,
+                "simulator_type": backend,
+                "simulation_method": method,
+                "config": {"shots": 512, "seed": value},
+            }
+        )
+        task = native_resource.task_start(payload)
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        counts.append(json.loads(native_resource.task_result(task).value)["counts"])
+    assert counts[0] == counts[1]
+    assert counts[0] != counts[2]
+    assert all(sum(result.values()) == 512 for result in counts)
 
 
 def test_native_failure_is_retained_in_task_logs(native_resource):
