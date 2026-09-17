@@ -1,0 +1,7 @@
+features:
+  - |
+    Updated Maestro local servers retain task diagnostics after cancellation and
+    expose timestamped lifecycle events and requested backend/MPI launch context
+    through the existing ``task_logs()`` JSON response. Captured output retains
+    its first and last 32 KiB, with explicit truncation metadata. These additive
+    fields require an updated local server and are forwarded unchanged by QRMI.

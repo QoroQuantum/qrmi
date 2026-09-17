@@ -209,6 +209,35 @@ fn native_target_and_failure_logs_preserve_vendor_documents() {
 }
 
 #[test]
+fn native_logs_preserve_cancelled_task_history_and_truncation_metadata() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let expected = serde_json::json!({
+        "version": 2, "ok": true, "session_id": 4, "task_id": 8,
+        "logs": "startup\n[... Maestro log output truncated ...]\nshutdown",
+        "logs_truncated": true, "logs_omitted_bytes": 12345,
+        "error": null, "failure_message": null,
+        "context": {"operation": "execute", "simulator": {"backend": "gpu"},
+                    "launch": {"profile": "cluster", "ranks": 2}},
+        "events": [
+            {"timestamp_unix_ms": 1700000000000_u64, "state": "queued"},
+            {"timestamp_unix_ms": 1700000000001_u64, "state": "started"},
+            {"timestamp_unix_ms": 1700000000002_u64, "state": "cancelled"}
+        ],
+        "events_truncated": false,
+    });
+    let server = Server::new(&[(
+        r#"API {"version":2,"command":"logs","session_id":4,"task_id":8}"#,
+        &format!("OK {expected}"),
+    )]);
+    let mut qrmi = resource(Some(4));
+    qrmi.terminal_tasks.insert((4, 8), TaskStatus::Cancelled);
+    let actual: serde_json::Value =
+        serde_json::from_str(&block_on(qrmi.task_logs("8")).unwrap()).unwrap();
+    assert_eq!(actual, expected);
+    server.assert_done();
+}
+
+#[test]
 fn old_server_cannot_silently_accept_native_features() {
     let _lock = ENV_LOCK.lock().unwrap();
     let server = Server::new(&[(

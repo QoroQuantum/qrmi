@@ -227,7 +227,21 @@ def test_exact_noise_capabilities_and_retained_logs(native_resource):
     result = json.loads(resource.task_result(task).value)
     assert result["expectation_values"] == pytest.approx([0.8, 0.36])
     assert result["noise"]["evaluation"] == "exact_channels"
-    assert json.loads(resource.task_logs(task))["ok"] is True
+    diagnostics = json.loads(resource.task_logs(task))
+    assert diagnostics["ok"] is True
+    assert diagnostics["task_id"] == int(task)
+    assert diagnostics["logs_truncated"] is False
+    assert diagnostics["logs_omitted_bytes"] == 0
+    assert [event["state"] for event in diagnostics["events"]] == [
+        "queued",
+        "started",
+        "completed",
+    ]
+    assert all(event["timestamp_unix_ms"] > 0 for event in diagnostics["events"])
+    assert diagnostics["context"]["simulator"] == {
+        "backend": "qcsim",
+        "method": "density_matrix",
+    }
     document["simulator"]["options"] = {"unknown_option": True}
     with pytest.raises(InvalidInputError):
         resource.task_start(request_payload(document))

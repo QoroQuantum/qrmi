@@ -67,7 +67,9 @@ Python client
 ``task_logs()`` returns serialized JSON containing captured stdout/stderr, the native
 error, and a failure message. Results retain native execution metadata, seeds, noise
 approximations, timing, and distribution details. Result retrieval still consumes the
-result; logs remain available until session cleanup. Observe failed status before
+result; logs remain available until session cleanup. Updated servers also retain
+logs after successful cancellation, including final output drained during worker
+shutdown. Observe failed status before
 requesting a result; QRMI raises ``TaskNotReady`` for failed tasks. If execution and
 cleanup both fail, ``error.code`` is ``cleanup_unconfirmed``, with
 ``cleanup_confirmed:false`` and a bounded ``causes`` array retaining earlier error
@@ -80,6 +82,28 @@ session calls for acquiring a new session, not choosing a new backend. Malformed
 launch/rank input maps to ``InvalidInputError``; a broken profile file or
 missing/nonexecutable launcher, worker or Slurm cancellation tool maps to
 ``ConfigError``. Selecting an unknown profile maps to ``UnsupportedFunctionError``.
+
+Updated servers add ``session_id``, ``task_id``, ``context`` and ``events`` to the
+same diagnostic JSON. Each event has ``timestamp_unix_ms`` and ``state``; submitted
+tasks normally progress through ``queued``, ``started`` and ``completed``,
+``failed`` or ``cancelled``. A failed cancellation records ``cancellation_failed``.
+Queued cancellation skips ``started``; cancellation before submission records
+only ``cancelled``. These are server lifecycle transitions, not native progress.
+The event array defines order even if the wall clock changes. History retains
+the first and latest seven events, with ``events_truncated`` indicating omissions.
+Context records requested backend/method and MPI profile/ranks when supplied;
+legacy tasks expose simulator/method IDs. It excludes circuit contents and
+arbitrary options. Effective native backend selection remains in result metadata.
+
+Captured stdout/stderr retains its first and last 32 KiB. For longer output,
+``logs_truncated`` is true, ``logs_omitted_bytes`` counts omitted raw bytes, and
+``logs`` contains a visible truncation marker between the retained pieces.
+The streams are merged in capture order and decoded with UTF-8 replacement for
+invalid bytes. Diagnostics live in server memory and disappear on session
+deletion, expiry or daemon restart. ``ok:true`` means retrieval succeeded, not
+that the task completed successfully. QRMI forwards all these additive fields;
+older API-v2 servers may omit them and retain their previous cancellation/capture
+behavior. Rebuild the local server to obtain the improved diagnostics.
 
 The server advertises ``server.session_lease_seconds`` (default 3600). Poll a running
 task or retrieve its logs comfortably within that interval. Native submit and logs also
