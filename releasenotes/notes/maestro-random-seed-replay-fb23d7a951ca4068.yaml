@@ -1,0 +1,9 @@
+features:
+  - |
+    With updated Maestro and maestro-local-server builds, omitted native seeds
+    are random, including a shared seed across MPI ranks. Explicit seed zero
+    remains reproducible. Results report the resolved execution seed, and
+    ``task_logs()`` retains execution and noise seeds after result consumption,
+    including paths into nested batch results. Seed history is bounded and lasts
+    until session cleanup or server restart. MPI execution requires a
+    maestro-gpu-distributed plugin that exports ``GenerateMpiSeed``.

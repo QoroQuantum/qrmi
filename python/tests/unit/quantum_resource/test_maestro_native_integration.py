@@ -211,6 +211,90 @@ def await_task(resource, task):
         time.sleep(0.02)
 
 
+@pytest.mark.parametrize("noisy", [False, True])
+@pytest.mark.parametrize("mpi", [False, True])
+def test_omitted_seeds_are_random_and_replay(native_resource, noisy, mpi):
+    """Replay CPU/MPI sampling from reported and retained random seeds."""
+    document = native_request("execute", "statevector")
+    if mpi:
+        profile = os.environ.get("QRMI_TEST_MPI_GPU_PROFILE")
+        if not profile:
+            pytest.skip("set QRMI_TEST_MPI_GPU_PROFILE to test native MPI seeds")
+        document["simulator"] = {
+            "backend": "distributed_mpi_gpu",
+            "distribution": {"backend": "ex"},
+        }
+        document["launch"] = {"profile": profile, "ranks": 2}
+    document["circuit"] = {
+        "num_qubits": 4,
+        "source": "OPENQASM 2.0; qreg q[4]; creg c[4]; h q; measure q->c;",
+    }
+    document["execution"] = {"shots": 4096}
+    if noisy:
+        document["noise"] = {
+            "realizations": 16,
+            "channels": [{"kind": "readout", "targets": [0], "probability": 0.3}],
+        }
+
+    def run():
+        task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        result = json.loads(native_resource.task_result(task).value)
+        if mpi:
+            assert result["execution_metadata"]["backend"] == "distributed_mpi_gpu"
+            assert result["mpi"]["ranks"] == 2
+        diagnostics = json.loads(native_resource.task_logs(task))
+        saved = {"result_path": [], "seed": result["seed"]}
+        if noisy:
+            saved["noise_seed"] = result["noise"]["seed"]
+        assert diagnostics["seeds"] == [saved]
+        assert diagnostics["seeds_truncated"] is False
+        return result, saved
+
+    (first, saved), (second, _) = run(), run()
+    assert first["seed"] != second["seed"]
+    assert first["counts"] != second["counts"]
+    if noisy:
+        assert first["noise"]["seed"] == first["seed"] & (2**32 - 1)
+    document["execution"]["seed"] = saved["seed"]
+    if noisy:
+        document["noise"]["seed"] = saved["noise_seed"]
+    assert run()[0]["counts"] == first["counts"]
+    document["execution"]["seed"] = 0
+    explicit_zero, _ = run()
+    assert explicit_zero["seed"] == 0
+    assert run()[0]["counts"] == explicit_zero["counts"]
+
+
+def test_batch_seeds_survive_result_consumption(native_resource):
+    """Keep seed paths for nested native batches after consuming the result."""
+    first = native_request("execute", "statevector")
+    first["execution"].pop("seed")
+    second = native_request("execute", "statevector")
+    second["execution"]["seed"] = 2**64 - 1
+    second["noise"] = {
+        "seed": 17,
+        "channels": [{"kind": "readout", "targets": [0], "probability": 0.3}],
+    }
+    document = {
+        "schema_version": 2,
+        "operation": "batch",
+        "requests": [
+            first,
+            {"schema_version": 2, "operation": "batch", "requests": [second]},
+        ],
+    }
+    task = native_resource.task_start(request_payload(document))
+    assert await_task(native_resource, task) == TaskStatus.Completed
+    result = json.loads(native_resource.task_result(task).value)
+    diagnostics = json.loads(native_resource.task_logs(task))
+    assert diagnostics["seeds"] == [
+        {"result_path": [0], "seed": result["results"][0]["seed"]},
+        {"result_path": [1, 0], "seed": 2**64 - 1, "noise_seed": 17},
+    ]
+    assert diagnostics["seeds_truncated"] is False
+
+
 def test_exact_noise_capabilities_and_retained_logs(native_resource):
     """Check exact noise, capabilities, and logs after consuming the result."""
     resource = native_resource
@@ -661,7 +745,7 @@ def test_real_mpi_gpu_execution(native_resource, noisy):
         "backend": "distributed_mpi_gpu",
         "options": {"gpu_device": 0},
         "distribution": {
-            "backend": "conventional",
+            "backend": "ex",
             "global_qubits": [1],
             "mpi_p2p_bits": 0,
         },

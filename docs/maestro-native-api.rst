@@ -67,7 +67,14 @@ Python client
 ``task_logs()`` returns serialized JSON containing captured stdout/stderr, the native
 error, and a failure message. Results retain native execution metadata, seeds, noise
 approximations, timing, and distribution details. Result retrieval still consumes the
-result; logs remain available until session cleanup. Updated servers also retain
+result; logs remain available until session cleanup. The logs' ``seeds`` array
+retains each resolved execution ``seed`` and, when present, ``noise_seed`` after
+result retrieval. Each entry's ``result_path`` is empty for a single request or
+contains successive result indices for nested batches. Replay the corresponding
+original request with those values as ``execution.seed`` and ``noise.seed``.
+Seed history is limited to 256 entries and four batch levels;
+``seeds_truncated`` indicates omitted results. It lasts until session cleanup or
+server restart. Updated servers also retain
 logs after successful cancellation, including final output drained during worker
 shutdown. Observe failed status before
 requesting a result; QRMI raises ``TaskNotReady`` for failed tasks. If execution and
@@ -250,7 +257,10 @@ delays.
 
 An explicit ``execution.seed`` or ``simulator.options.seed`` controls measurement
 and readout randomness. Otherwise, an explicit ``noise.seed`` also seeds the
-simulator; the default is zero when neither is supplied. ``noise.seed`` drives
+simulator; when neither is supplied, each request receives a fresh random uint64
+seed, returned in its result's ``seed`` field. Pass that value as ``execution.seed``
+to replay the request. Zero remains a valid explicit seed. MPI ranks share one
+generated seed through their communicator. ``noise.seed`` drives
 circuit-noise injection independently and defaults to the simulator seed's lower
 32 bits. These changes require an updated Maestro library.
 
