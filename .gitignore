@@ -1,6 +1,13 @@
 # Prerequisites
 *.d
 
+# Testing
+.coverage
+.coverage.*
+*.coverage
+coverage.txt
+htmlcov/
+
 # Compiled Object files
 *.slo
 *.lo
