@@ -112,8 +112,7 @@ def test_fixed_selection_multiple_shots(native_resource, backend, method, select
         "num_qubits": 2,
         "num_clbits": 2,
         "source": (
-            "OPENQASM 2.0; qreg q[2]; creg c[2]; "
-            "h q[0]; cx q[0],q[1]; measure q->c;"
+            "OPENQASM 2.0; qreg q[2]; creg c[2]; " "h q[0]; cx q[0],q[1]; measure q->c;"
         ),
     }
     document["simulator"]["backend"] = backend
@@ -140,7 +139,12 @@ def test_fixed_selection_multiple_shots(native_resource, backend, method, select
 @pytest.mark.parametrize("backend", ["qcsim", "gpu"])
 @pytest.mark.parametrize(
     "method",
-    ["statevector", "matrix_product_state", "density_matrix", "matrix_product_operator"],
+    [
+        "statevector",
+        "matrix_product_state",
+        "density_matrix",
+        "matrix_product_operator",
+    ],
 )
 def test_fixed_noisy_shots_remain_independent(native_resource, backend, method):
     """Relaxation and readout must not freeze one outcome across reused shots."""
@@ -153,8 +157,7 @@ def test_fixed_noisy_shots_remain_independent(native_resource, backend, method):
         "num_qubits": 2,
         "num_clbits": 2,
         "source": (
-            "OPENQASM 2.0; qreg q[2]; creg c[2]; "
-            "h q[0]; cx q[0],q[1]; measure q->c;"
+            "OPENQASM 2.0; qreg q[2]; creg c[2]; " "h q[0]; cx q[0],q[1]; measure q->c;"
         ),
     }
     document["execution"]["shots"] = 4096
