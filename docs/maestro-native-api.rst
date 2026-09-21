@@ -235,6 +235,15 @@ validates it and removes it before native validation/execution. Direct Maestro C
 launch ``maestro-mpi-worker`` yourself with a computational document.
 
 The native API defaults to fixed backend selection and rejects unavailable selections.
+Fixed selection preserves reuse across shots with the corrected Maestro library:
+eligible circuits evolve once per execution job and sample repeatedly. QRMI forwards
+the selection and shot count unchanged; no client-side switch to automatic selection
+is needed. Deploy the updated ``libmaestro.so`` on the local server and all configured
+native/MPI workers, then restart the server. Updating QRMI alone does not update that
+native runtime. The fixed-selection integration checks can include ordinary GPU MPS
+and statevector execution by setting ``QRMI_TEST_GPU=1``. The noisy-shot checks
+also cover density matrix and MPO: reuse stays within each noise realization,
+with independent relaxation-reset outcomes and readout flips on each shot.
 Automatic ideal execute/estimate can use explicit candidate lists. Exact quantum
 channels require density-matrix/MPO methods; pure-state sampled noise follows Maestro's
 existing helper approximations. Distributed GPU engines currently support statevectors.

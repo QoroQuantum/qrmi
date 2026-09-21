@@ -100,6 +100,89 @@ def test_cpu_examples_through_qrmi(native_resource, name):
         )
 
 
+@pytest.mark.parametrize("backend", ["qcsim", "gpu"])
+@pytest.mark.parametrize("method", ["statevector", "matrix_product_state"])
+@pytest.mark.parametrize("selection", [None, "fixed"])
+def test_fixed_selection_multiple_shots(native_resource, backend, method, selection):
+    """Forward fixed/default selection without changing the method or shot count."""
+    if backend == "gpu" and os.environ.get("QRMI_TEST_GPU") != "1":
+        pytest.skip("set QRMI_TEST_GPU=1 with an available GPU plugin")
+    document = native_request("execute", method)
+    document["circuit"] = {
+        "num_qubits": 2,
+        "num_clbits": 2,
+        "source": (
+            "OPENQASM 2.0; qreg q[2]; creg c[2]; "
+            "h q[0]; cx q[0],q[1]; measure q->c;"
+        ),
+    }
+    document["simulator"]["backend"] = backend
+    if selection is not None:
+        document["simulator"]["selection"] = selection
+    document["execution"]["shots"] = 4096
+    previous = None
+    for _ in range(2):
+        task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        result = json.loads(native_resource.task_result(task).value)
+        assert result["execution_metadata"]["backend"] == backend
+        assert result["execution_metadata"]["method"] == method
+        assert result["execution_metadata"]["selection"] == "fixed"
+        assert result["shots"] == 4096
+        assert set(result["counts"]) == {"00", "11"}
+        assert sum(result["counts"].values()) == 4096
+        assert min(result["counts"].values()) > 1024
+        if previous is not None:
+            assert result["counts"] == previous
+        previous = result["counts"]
+
+
+@pytest.mark.parametrize("backend", ["qcsim", "gpu"])
+@pytest.mark.parametrize(
+    "method",
+    ["statevector", "matrix_product_state", "density_matrix", "matrix_product_operator"],
+)
+def test_fixed_noisy_shots_remain_independent(native_resource, backend, method):
+    """Relaxation and readout must not freeze one outcome across reused shots."""
+    if backend == "gpu" and os.environ.get("QRMI_TEST_GPU") != "1":
+        pytest.skip("set QRMI_TEST_GPU=1 with an available GPU plugin")
+    document = native_request("execute", method)
+    document["simulator"]["backend"] = backend
+    document["simulator"]["selection"] = "fixed"
+    document["circuit"] = {
+        "num_qubits": 2,
+        "num_clbits": 2,
+        "source": (
+            "OPENQASM 2.0; qreg q[2]; creg c[2]; "
+            "h q[0]; cx q[0],q[1]; measure q->c;"
+        ),
+    }
+    document["execution"]["shots"] = 4096
+    document["noise"] = {
+        "realizations": 1,
+        "seed": 23,
+        "channels": [
+            {"kind": "t1_2q", "targets": [0], "gamma": 1.0},
+            {"kind": "readout", "targets": [0], "probability": 0.5},
+        ],
+    }
+    previous = None
+    for _ in range(2):
+        task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        result = json.loads(native_resource.task_result(task).value)
+        assert result["execution_metadata"]["backend"] == backend
+        assert result["execution_metadata"]["method"] == method
+        assert result["execution_metadata"]["selection"] == "fixed"
+        assert result["noise"]["realizations"] == 1
+        assert set(result["counts"]) == {"00", "01", "10", "11"}
+        assert sum(result["counts"].values()) == 4096
+        assert all(700 < count < 1350 for count in result["counts"].values())
+        if previous is not None:
+            assert result["counts"] == previous
+        previous = result["counts"]
+
+
 @pytest.fixture(name="native_resource")
 def fixture_native_resource(tmp_path, monkeypatch, request):
     """Start a private native daemon and clean up its acquired session."""
