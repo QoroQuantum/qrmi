@@ -139,7 +139,6 @@ async fn task_result_reads_s3_settings_from_config() {
     let err = qrmi
         .task_result("some-task")
         .await
-        .err()
-        .expect("task_result should fail");
+        .expect_err("task_result should fail");
     assert!(matches!(err, QrmiError::MissingConfigKey(ref key) if key == "QRMI_IBM_QS_S3_BUCKET"));
 }

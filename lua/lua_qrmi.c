@@ -140,9 +140,11 @@ static const char *task_status_to_string(QrmiTaskStatus s) {
 }
 
 /**
- * @brief Convert a QrmiResourceStatusCode enum value to its Lua-facing string form.
+ * @brief Convert a QrmiResourceStatusCode enum value to its Lua-facing string
+ * form.
  *
- * @param s A QrmiResourceStatusCode value as returned by qrmi_resource_status_code().
+ * @param s A QrmiResourceStatusCode value as returned by
+ * qrmi_resource_status_code().
  * @return One of "online", "offline" or "paused".
  */
 static const char *status_code_to_string(QrmiResourceStatusCode s) {
@@ -150,7 +152,8 @@ static const char *status_code_to_string(QrmiResourceStatusCode s) {
 }
 
 /**
- * @brief `qrmi.new(resource_id, resource_type_str)` - Create a quantum resource handle.
+ * @brief `qrmi.new(resource_id, resource_type_str)` - Create a quantum resource
+ * handle.
  *
  * Wraps qrmi_resource_new().
  *
@@ -202,14 +205,16 @@ static int l_qrmi_new(lua_State *L) {
 }
 
 /**
- * @brief Free a `QrmiKeyValue` array allocated by build_config_map_from_table().
+ * @brief Free a `QrmiKeyValue` array allocated by
+ * build_config_map_from_table().
  *
  * @param pairs Array to free, or NULL (in which case this is a no-op).
  * @param count Number of entries in @p pairs that were actually populated
  *              (i.e. have owned `key`/`value` strings to free).
  */
 static void free_config_pairs(QrmiKeyValue *pairs, size_t count) {
-    if (!pairs) return;
+    if (!pairs)
+        return;
     for (size_t i = 0; i < count; i++) {
         free(pairs[i].key);
         free(pairs[i].value);
@@ -232,10 +237,14 @@ static void free_config_pairs(QrmiKeyValue *pairs, size_t count) {
  *         (NULL if the table is empty). Never returns on failure (raises a
  *         Lua error instead).
  */
-static QrmiKeyValue *build_config_map_from_table(lua_State *L, int idx, size_t *out_count) {
+static QrmiKeyValue *build_config_map_from_table(lua_State *L, int idx,
+                                                 size_t *out_count) {
     // idx must be a positive/absolute stack index
     if (idx <= 0) {
-        luaL_error(L, "build_config_map_from_table: table index must be positive (got %d)", idx);
+        luaL_error(L,
+                   "build_config_map_from_table: table index must be positive "
+                   "(got %d)",
+                   idx);
     }
 
     size_t count = 0;
@@ -245,7 +254,8 @@ static QrmiKeyValue *build_config_map_from_table(lua_State *L, int idx, size_t *
         lua_pop(L, 1);
     }
     *out_count = count;
-    if (count == 0) return NULL;
+    if (count == 0)
+        return NULL;
 
     QrmiKeyValue *pairs = (QrmiKeyValue *)calloc(count, sizeof(QrmiKeyValue));
     if (!pairs) {
@@ -277,15 +287,15 @@ static QrmiKeyValue *build_config_map_from_table(lua_State *L, int idx, size_t *
 }
 
 /**
- * @brief `qrmi.new_from_config(resource_id, resource_type, config)` - Create a quantum
- * resource handle from an explicit config map.
+ * @brief `qrmi.new_from_config(resource_id, resource_type, config)` - Create a
+ * quantum resource handle from an explicit config map.
  *
  * Wraps qrmi_resource_new_from_config().
  *
  * Lua usage:
  * @code
- *   local resource, err = qrmi.new_from_config("ibm_kingston", "ibm-quantum-compute-service", {
- *       QRMI_IBM_QCS_ENDPOINT = "...",
+ *   local resource, err = qrmi.new_from_config("ibm_kingston",
+ * "ibm-quantum-compute-service", { QRMI_IBM_QCS_ENDPOINT = "...",
  *       QRMI_IBM_QCS_IAM_ENDPOINT = "...",
  *       QRMI_IBM_QCS_IAM_APIKEY = "...",
  *       QRMI_IBM_QCS_SERVICE_CRN = "...",
@@ -294,7 +304,8 @@ static QrmiKeyValue *build_config_map_from_table(lua_State *L, int idx, size_t *
  *
  * @param L Lua state. Stack arguments:
  *   - [1] resource_id (string)   e.g. "ibm_kingston"
- *   - [2] resource_type (string) canonical hyphenated name, same values as `qrmi.new()`
+ *   - [2] resource_type (string) canonical hyphenated name, same values as
+ * `qrmi.new()`
  *   - [3] config (table) string -> string config map; required/optional
  *         keys are specific to each resource type -- the same names as the
  *         environment variables, minus the `{resource_id}_` prefix (see the
@@ -324,7 +335,8 @@ static int l_qrmi_new_from_config(lua_State *L) {
     config_map.variables = pairs;
     config_map.length = count;
 
-    QrmiQuantumResource *handle = qrmi_resource_new_from_config(resource_id, type, &config_map);
+    QrmiQuantumResource *handle =
+        qrmi_resource_new_from_config(resource_id, type, &config_map);
     free_config_pairs(pairs, count);
 
     if (!handle) {
@@ -334,7 +346,8 @@ static int l_qrmi_new_from_config(lua_State *L) {
         return 2;
     }
 
-    lua_qrmi_resource_t *ud = (lua_qrmi_resource_t *)lua_newuserdata(L, sizeof(lua_qrmi_resource_t));
+    lua_qrmi_resource_t *ud =
+        (lua_qrmi_resource_t *)lua_newuserdata(L, sizeof(lua_qrmi_resource_t));
     ud->handle = handle;
     ud->acquisition_token = NULL;
     luaL_getmetatable(L, QRMI_RESOURCE_MT);
@@ -383,8 +396,8 @@ static int l_is_accessible(lua_State *L) {
     lua_qrmi_resource_t *ud = check_resource(L, 1);
     bool accessible = false;
 
-    fprintf(stderr,
-        "warning: resource:is_accessible() is deprecated, use resource:status() instead\n");
+    fprintf(stderr, "warning: resource:is_accessible() is deprecated, use "
+                    "resource:status() instead\n");
 
     QrmiReturnCode rc = qrmi_resource_is_accessible(ud->handle, &accessible);
     if (rc != QRMI_RETURN_CODE_SUCCESS)
@@ -634,7 +647,8 @@ static int submit_iqm_server_payload(lua_State *L, lua_qrmi_resource_t *ud,
  * @param variant_idx Stack index of the sub-table holding `job_spec`.
  * @return Number of values pushed onto the Lua stack (see l_task_start).
  */
-static int submit_oqtopus_payload(lua_State *L, lua_qrmi_resource_t *ud, int variant_idx) {
+static int submit_oqtopus_payload(lua_State *L, lua_qrmi_resource_t *ud,
+                                  int variant_idx) {
     lua_getfield(L, variant_idx, "job_spec");
     const char *job_spec = luaL_checkstring(L, -1);
 
@@ -643,11 +657,13 @@ static int submit_oqtopus_payload(lua_State *L, lua_qrmi_resource_t *ud, int var
     payload.OQTOPUS.job_spec = (char *)job_spec;
 
     char *task_id = NULL;
-    QrmiReturnCode rc = qrmi_resource_task_start(ud->handle, &payload, &task_id);
+    QrmiReturnCode rc =
+        qrmi_resource_task_start(ud->handle, &payload, &task_id);
 
     lua_settop(L, variant_idx - 1); /* drop variant table, job_spec */
 
-    if (rc != QRMI_RETURN_CODE_SUCCESS) return push_qrmi_error(L, rc);
+    if (rc != QRMI_RETURN_CODE_SUCCESS)
+        return push_qrmi_error(L, rc);
 
     lua_pushstring(L, task_id);
     qrmi_string_free(task_id);
@@ -655,7 +671,8 @@ static int submit_oqtopus_payload(lua_State *L, lua_qrmi_resource_t *ud, int var
 }
 
 /**
- * @brief Build and submit a QRMI_PAYLOAD_PASQAL_CLOUD payload from a Lua sub-table.
+ * @brief Build and submit a QRMI_PAYLOAD_PASQAL_CLOUD payload from a Lua
+ * sub-table.
  *
  * Used for `resource:task_start()`'s "pasqal_cloud" payload key, which is
  * used for both Pasqal Cloud and Pasqal Local resources: qrmi.h's
@@ -904,7 +921,6 @@ static int l_task_start(lua_State *L) {
     }
     lua_pop(L, 1);
 
-
     lua_getfield(L, 2, "oqtopus");
     if (lua_istable(L, -1)) {
         variant_idx = lua_gettop(L);
@@ -913,10 +929,11 @@ static int l_task_start(lua_State *L) {
     lua_pop(L, 1);
 
     lua_pushnil(L);
-    lua_pushstring(L,
-        "task_start: payload table must contain one of 'qiskit_primitive', "
-        "'iqm_server', 'pasqal_cloud' (used for both Pasqal Cloud and "
-        "Pasqal Local resources), 'alice_bob_felis', 'oqtopus', or 'maestro_local'");
+    lua_pushstring(
+        L, "task_start: payload table must contain one of 'qiskit_primitive', "
+           "'iqm_server', 'pasqal_cloud' (used for both Pasqal Cloud and "
+           "Pasqal Local resources), 'alice_bob_felis', 'oqtopus', or "
+           "'maestro_local'");
     return 2;
 }
 
@@ -1096,7 +1113,8 @@ static int l_metadata(lua_State *L) {
 }
 
 /**
- * @brief `resource:status()` - Fetch detailed status information as a Lua table.
+ * @brief `resource:status()` - Fetch detailed status information as a Lua
+ * table.
  *
  * Wraps qrmi_resource_status() and its field accessors
  * (qrmi_resource_status_code(), qrmi_resource_status_reason(),
@@ -1132,7 +1150,8 @@ static int l_status(lua_State *L) {
 
     QrmiResourceStatus *status = NULL;
     QrmiReturnCode rc = qrmi_resource_status(ud->handle, &status);
-    if (rc != QRMI_RETURN_CODE_SUCCESS) return push_qrmi_error(L, rc);
+    if (rc != QRMI_RETURN_CODE_SUCCESS)
+        return push_qrmi_error(L, rc);
 
     lua_newtable(L);
 
@@ -1163,7 +1182,8 @@ static int l_status(lua_State *L) {
     lua_setfield(L, -2, "busy");
 
     bool healthy = false;
-    if (qrmi_resource_status_healthy(status, &healthy) == QRMI_RETURN_CODE_SUCCESS) {
+    if (qrmi_resource_status_healthy(status, &healthy) ==
+        QRMI_RETURN_CODE_SUCCESS) {
         lua_pushboolean(L, healthy);
     } else {
         lua_pushnil(L);
@@ -1171,7 +1191,8 @@ static int l_status(lua_State *L) {
     lua_setfield(L, -2, "healthy");
 
     uint64_t pending_job_count = 0;
-    if (qrmi_resource_status_pending_job_count(status, &pending_job_count) == QRMI_RETURN_CODE_SUCCESS) {
+    if (qrmi_resource_status_pending_job_count(status, &pending_job_count) ==
+        QRMI_RETURN_CODE_SUCCESS) {
         lua_pushinteger(L, (lua_Integer)pending_job_count);
     } else {
         lua_pushnil(L);
@@ -1179,7 +1200,8 @@ static int l_status(lua_State *L) {
     lua_setfield(L, -2, "pending_job_count");
 
     QrmiResourceCapacity *capacity = NULL;
-    if (qrmi_resource_status_capacity(status, &capacity) == QRMI_RETURN_CODE_SUCCESS) {
+    if (qrmi_resource_status_capacity(status, &capacity) ==
+        QRMI_RETURN_CODE_SUCCESS) {
         lua_newtable(L);
         lua_pushinteger(L, (lua_Integer)capacity->available_slots);
         lua_setfield(L, -2, "available_slots");
@@ -1287,24 +1309,22 @@ static int l_resource_gc(lua_State *L) {
 }
 
 /** @brief Method table installed on the `qrmi.resource` metatable's __index. */
-static const luaL_Reg resource_methods[] = {
-    {"is_accessible", l_is_accessible},
-    {"status",        l_status},
-    {"id",            l_resource_id},
-    {"type",          l_resource_type},
-    {"acquire",       l_acquire},
-    {"release",       l_release},
-    {"task_start",    l_task_start},
-    {"task_status",   l_task_status},
-    {"task_result",   l_task_result},
-    {"task_logs",     l_task_logs},
-    {"task_stop",     l_task_stop},
-    {"metadata",      l_metadata},
-    {"target",        l_target},
-    {"free",          l_resource_free},
-    {"__gc",          l_resource_gc},
-    {NULL, NULL}
-};
+static const luaL_Reg resource_methods[] = {{"is_accessible", l_is_accessible},
+                                            {"status", l_status},
+                                            {"id", l_resource_id},
+                                            {"type", l_resource_type},
+                                            {"acquire", l_acquire},
+                                            {"release", l_release},
+                                            {"task_start", l_task_start},
+                                            {"task_status", l_task_status},
+                                            {"task_result", l_task_result},
+                                            {"task_logs", l_task_logs},
+                                            {"task_stop", l_task_stop},
+                                            {"metadata", l_metadata},
+                                            {"target", l_target},
+                                            {"free", l_resource_free},
+                                            {"__gc", l_resource_gc},
+                                            {NULL, NULL}};
 
 /* =========================================================================
  * qrmi.config — completely independent from qrmi.resource above.
@@ -1488,11 +1508,10 @@ static const luaL_Reg config_methods[] = {
 
 /** @brief Function table installed on the `qrmi` module table. */
 static const luaL_Reg qrmi_functions[] = {
-    {"new",             l_qrmi_new},
+    {"new", l_qrmi_new},
     {"new_from_config", l_qrmi_new_from_config},
-    {"load_config",     l_qrmi_load_config},
-    {NULL, NULL}
-};
+    {"load_config", l_qrmi_load_config},
+    {NULL, NULL}};
 
 /**
  * @brief Module entry point, invoked by Lua's `require("qrmi")`.

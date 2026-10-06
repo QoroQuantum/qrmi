@@ -15,7 +15,7 @@ from qrmi.tools.task_runner import main
 EXAMPLES = Path(__file__).resolve().parents[4] / "examples/task_runner/maestro_local"
 
 
-def test_oqtopus_schema_does_not_bypass_maestro_validation():
+def test_oqtopus_cannot_bypass_maestro_validation():
     """An OQTOPUS field must not rescue an invalid Maestro request."""
     schema = json.loads(
         (EXAMPLES.parents[2] / "qrmi_payload_v1_schema.json").read_text()

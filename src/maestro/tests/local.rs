@@ -849,7 +849,10 @@ fn resource_keeps_one_socket_and_native_submission_clears_reused_status() {
     ]);
     let mut qrmi = resource(None);
     let other = Server::new(&[]); // Changes the process-wide socket environment.
-    assert!(block_on(qrmi.is_accessible()).unwrap());
+    assert_eq!(
+        block_on(qrmi.status()).unwrap().status,
+        crate::ResourceStatusCode::Online
+    );
     let token = block_on(qrmi.acquire()).unwrap();
     block_on(qrmi.target()).unwrap();
     qrmi.terminal_tasks.insert((5, 7), TaskStatus::Completed);

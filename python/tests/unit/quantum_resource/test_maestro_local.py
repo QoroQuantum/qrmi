@@ -115,7 +115,7 @@ def test_python_errors_are_classified_without_a_session(monkeypatch):
         QuantumResource("py_maestro", ResourceType.MaestroLocal)
 
 
-def test_from_config_retains_socket_session_and_reports_status(server, monkeypatch):
+def test_config_preserves_socket_session_and_status(server, monkeypatch):
     """The config factory uses explicit settings despite conflicting environment."""
     socket_path = os.environ["QRMI_MAESTRO_SOCKET"]
     monkeypatch.setenv("QRMI_MAESTRO_SOCKET", "/wrong.sock")
