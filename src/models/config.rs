@@ -42,6 +42,8 @@ pub enum ResourceType {
     AliceBobFelis,
     // IQM Server
     IQMServer,
+    // OQTOPUS
+    OQTOPUS,
     /// Maestro Local
     MaestroLocal,
 }
@@ -62,6 +64,7 @@ impl<'de> serde::Deserialize<'de> for ResourceType {
                     "pasqal-local",
                     "alice-bob-felis",
                     "iqm-server",
+                    "oqtopus",
                     "maestro-local",
                 ],
             )
@@ -78,6 +81,7 @@ impl ResourceType {
             ResourceType::PasqalLocal => "pasqal-local",
             ResourceType::AliceBobFelis => "alice-bob-felis",
             ResourceType::IQMServer => "iqm-server",
+            ResourceType::OQTOPUS => "oqtopus",
             ResourceType::MaestroLocal => "maestro-local",
         }
     }
@@ -98,6 +102,7 @@ impl ResourceType {
             "pasqal-local" => Some(ResourceType::PasqalLocal),
             "alice-bob-felis" => Some(ResourceType::AliceBobFelis),
             "iqm-server" => Some(ResourceType::IQMServer),
+            "oqtopus" => Some(ResourceType::OQTOPUS),
             "maestro-local" => Some(ResourceType::MaestroLocal),
             _ => None,
         }

@@ -15,6 +15,25 @@ from qrmi.tools.task_runner import main
 EXAMPLES = Path(__file__).resolve().parents[4] / "examples/task_runner/maestro_local"
 
 
+def test_oqtopus_schema_does_not_bypass_maestro_validation():
+    """An OQTOPUS field must not rescue an invalid Maestro request."""
+    schema = json.loads(
+        (EXAMPLES.parents[2] / "qrmi_payload_v1_schema.json").read_text()
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    validator.check_schema(schema)
+    assert validator.is_valid(
+        {"job_spec": '{"job_type":"sampling","program":["qasm"]}'}
+    )
+    for invalid in [
+        {"schema_version": 1},
+        {"request": 123},
+        {"job_type": "execute"},
+        {"job_type": "REQUEST", "input": 123},
+    ]:
+        assert not validator.is_valid({**invalid, "job_spec": "{}"})
+
+
 @pytest.mark.parametrize(
     "path", sorted(EXAMPLES.glob("native-*.json")), ids=lambda p: p.stem
 )

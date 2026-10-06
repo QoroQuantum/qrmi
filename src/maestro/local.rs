@@ -10,6 +10,7 @@
 // copyright notice, and modified files need to carry a notice indicating
 // that they have been altered from the originals.
 
+use crate::common::resolve_opt;
 use crate::models::{Payload, ResourceType, Target, TaskResult, TaskStatus};
 use crate::{QrmiError, QuantumResource, Result};
 use anyhow::anyhow;
@@ -95,6 +96,35 @@ impl MaestroLocal {
             backend_name: backend_name.to_string(),
             session_id,
             request_client: RequestClient::default(),
+            terminal_tasks: HashMap::new(),
+        })
+    }
+
+    /// Constructs a Maestro Local instance from an explicit configuration map.
+    ///
+    /// Accepts `QRMI_MAESTRO_SOCKET` (default `/run/maestro.sock`) and
+    /// `QRMI_JOB_ACQUISITION_TOKEN` (optional existing session ID), without a
+    /// backend-name prefix. Fully lowercase keys are accepted as a fallback.
+    /// This constructor does not read or modify the process environment.
+    pub fn from_config(backend_name: &str, config: HashMap<String, String>) -> Result<Self> {
+        let name = "QRMI_JOB_ACQUISITION_TOKEN";
+        let session_id = resolve_opt(name, Some(&config))
+            .map(|value| {
+                value
+                    .parse::<u32>()
+                    .map_err(|source| QrmiError::ParseError {
+                        name: name.into(),
+                        value,
+                        source: Box::new(source),
+                    })
+            })
+            .transpose()?;
+        let socket = resolve_opt("QRMI_MAESTRO_SOCKET", Some(&config))
+            .unwrap_or_else(|| "/run/maestro.sock".into());
+        Ok(Self {
+            backend_name: backend_name.into(),
+            session_id,
+            request_client: RequestClient::new(socket),
             terminal_tasks: HashMap::new(),
         })
     }

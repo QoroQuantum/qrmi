@@ -23,7 +23,10 @@ Migration Guides
 .. toctree::
     :maxdepth: 2
     
+    v0.25.0_status
+    v0.25.0
     v0.24.0
+    maestro-0.26
     maestro-0.24
     v0.23.0
     v0.13.0

@@ -18,6 +18,7 @@ from qrmi import (
     QRMIService,
     QuantumResource,
     ResourceType,
+    ResourceStatusCode,
     TaskNotFoundError,
     TaskNotReadyError,
     UnsupportedFunctionError,
@@ -112,6 +113,50 @@ def test_python_errors_are_classified_without_a_session(monkeypatch):
     monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "invalid")
     with pytest.raises(ConfigError):
         QuantumResource("py_maestro", ResourceType.MaestroLocal)
+
+
+def test_from_config_retains_socket_session_and_reports_status(server, monkeypatch):
+    """The config factory uses explicit settings despite conflicting environment."""
+    socket_path = os.environ["QRMI_MAESTRO_SOCKET"]
+    monkeypatch.setenv("QRMI_MAESTRO_SOCKET", "/wrong.sock")
+    monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "invalid")
+    resource = QuantumResource.from_config(
+        "py_maestro",
+        ResourceType.MaestroLocal,
+        {"qrmi_maestro_socket": socket_path, "qrmi_job_acquisition_token": "42"},
+    )
+    server.extend(
+        [
+            ("PING", "OK YES"),
+            ("PING", "OK NO"),
+            ("SESSION 42 EXISTS", "OK YES"),
+            ("SESSION 42 DELETE", "OK YES"),
+        ]
+    )
+    assert resource.status().to_dict() == {
+        "status": "online",
+        "status_reason": None,
+        "healthy": None,
+        "busy": None,
+        "capacity": None,
+        "pending_job_count": None,
+    }
+    assert resource.status().status == ResourceStatusCode.Offline
+    assert resource.acquire() == "42"
+    resource.release("42")
+    assert os.environ["QRMI_MAESTRO_SOCKET"] == "/wrong.sock"
+    with pytest.raises(ConfigError):
+        QuantumResource.from_config(
+            "py_maestro",
+            ResourceType.MaestroLocal,
+            {"QRMI_JOB_ACQUISITION_TOKEN": "invalid"},
+        )
+
+
+def test_provider_values_preserve_upstream_abi():
+    """OQTOPUS keeps the upstream value; Maestro moves after it."""
+    assert int(ResourceType.OQTOPUS) == 7
+    assert int(ResourceType.MaestroLocal) == 8
 
 
 def test_service_preserves_maestro_session(server, monkeypatch):

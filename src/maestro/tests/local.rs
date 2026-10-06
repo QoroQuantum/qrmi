@@ -148,6 +148,92 @@ fn resource(session: Option<u32>) -> MaestroLocal {
     }
 }
 
+#[test]
+fn explicit_config_is_isolated_from_environment() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _socket = EnvGuard::set("QRMI_MAESTRO_SOCKET", Some("/wrong.sock".as_ref()));
+    let _token = EnvGuard::set(
+        "configured_QRMI_JOB_ACQUISITION_TOKEN",
+        Some("invalid".as_ref()),
+    );
+    let defaults = MaestroLocal::from_config("configured", Default::default()).unwrap();
+    assert_eq!(
+        defaults.request_client.socket_path(),
+        std::path::Path::new("/run/maestro.sock")
+    );
+    assert_eq!(defaults.session_id, None);
+    let configured = MaestroLocal::from_config(
+        "configured",
+        std::collections::HashMap::from([
+            ("qrmi_maestro_socket".into(), "/explicit.sock".into()),
+            ("qrmi_job_acquisition_token".into(), "42".into()),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(
+        configured.request_client.socket_path(),
+        std::path::Path::new("/explicit.sock")
+    );
+    assert_eq!(configured.session_id, Some(42));
+    assert_eq!(std::env::var("QRMI_MAESTRO_SOCKET").unwrap(), "/wrong.sock");
+    for invalid in ["invalid", "-1", "4294967296", ""] {
+        let error = MaestroLocal::from_config(
+            "configured",
+            std::collections::HashMap::from([
+                ("QRMI_JOB_ACQUISITION_TOKEN".into(), invalid.into()),
+                ("qrmi_job_acquisition_token".into(), "42".into()),
+            ]),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.kind(), QrmiErrorKind::ParseError);
+    }
+}
+
+#[test]
+fn config_factory_preserves_session_and_status_behavior() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let server = Server::new(&[
+        ("PING", "OK YES"),
+        ("PING", "OK NO"),
+        ("PING", "ERROR unavailable"),
+        ("SESSION 42 EXISTS", "OK YES"),
+        ("SESSION 42 DELETE", "OK YES"),
+    ]);
+    let mut resource = crate::common::create_resource_from_config(
+        &ResourceType::MaestroLocal,
+        "configured",
+        std::collections::HashMap::from([
+            (
+                "QRMI_MAESTRO_SOCKET".into(),
+                server.path.to_str().unwrap().into(),
+            ),
+            ("QRMI_JOB_ACQUISITION_TOKEN".into(), "42".into()),
+        ]),
+    )
+    .unwrap();
+    let _socket = EnvGuard::set("QRMI_MAESTRO_SOCKET", Some("/wrong.sock".as_ref()));
+    block_on(async {
+        let status = resource.status().await.unwrap();
+        assert_eq!(status.status, crate::ResourceStatusCode::Online);
+        assert_eq!(status.healthy, None);
+        assert_eq!(status.capacity, None);
+        assert_eq!(
+            resource.status().await.unwrap().status,
+            crate::ResourceStatusCode::Offline
+        );
+        assert!(resource
+            .status()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unavailable"));
+        assert_eq!(resource.acquire().await.unwrap(), "42");
+        resource.release("42").await.unwrap();
+    });
+    server.assert_done();
+}
+
 fn request_payload(input: String) -> Payload {
     Payload::MaestroLocal {
         input,

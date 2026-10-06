@@ -15,7 +15,7 @@ use crate::error::{QrmiError, QrmiErrorKind};
 use crate::ibm::IBMQiskitRuntimeServiceProvider;
 use crate::ibm::IBMQuantumComputeServiceProvider;
 use crate::ibm::IBMQuantumSystemProvider;
-use crate::models::{Payload, ResourceDef, Target, TaskResult, TaskStatus};
+use crate::models::{Payload, ResourceDef, ResourceStatus, Target, TaskResult, TaskStatus};
 use crate::QuantumResource;
 use pyo3::prelude::*;
 use pyo3_stub_gen::{create_exception, define_stub_info_gatherer, derive::*};
@@ -129,6 +129,7 @@ pub enum ResourceType {
     PasqalLocal,
     AliceBobFelis,
     IQMServer,
+    OQTOPUS,
     MaestroLocal,
 }
 impl From<ResourceType> for crate::models::ResourceType {
@@ -145,6 +146,7 @@ impl From<ResourceType> for crate::models::ResourceType {
             ResourceType::PasqalLocal => crate::models::ResourceType::PasqalLocal,
             ResourceType::AliceBobFelis => crate::models::ResourceType::AliceBobFelis,
             ResourceType::IQMServer => crate::models::ResourceType::IQMServer,
+            ResourceType::OQTOPUS => crate::models::ResourceType::OQTOPUS,
             ResourceType::MaestroLocal => crate::models::ResourceType::MaestroLocal,
         }
     }
@@ -211,9 +213,48 @@ impl PyQuantumResource {
         })
     }
 
+    /// Constructs a `QuantumResource` from a config of type `dict[str, str]`
+    #[staticmethod]
+    pub fn from_config(
+        resource_id: &str,
+        resource_type: ResourceType,
+        config: std::collections::HashMap<String, String>,
+    ) -> PyResult<Self> {
+        crate::common::initialize();
+        let qrmi =
+            crate::common::create_resource_from_config(&resource_type.into(), resource_id, config)
+                .map_err(to_py_err)?;
+
+        Ok(Self {
+            qrmi,
+            rt: std::mem::ManuallyDrop::new(
+                Runtime::new().expect("Failed to create a new tokio runtime."),
+            ),
+        })
+    }
+
     fn is_accessible(&mut self, py: Python<'_>) -> PyResult<bool> {
         crate::common::initialize();
+        let warnings = py.import("warnings")?;
+        warnings.call_method1(
+            "warn",
+            (
+                "is_accessible() is deprecated, use status() instead",
+                py.get_type::<pyo3::exceptions::PyDeprecationWarning>(),
+                1, // stacklevel
+            ),
+        )?;
+        // Deliberately calls the (deprecated) trait method rather than
+        // deriving the answer from status(): each vendor keeps its own
+        // definition of "accessible", so this binding's behavior is unchanged.
+        #[allow(deprecated)]
         let result = py.detach(|| self.rt.block_on(async { self.qrmi.is_accessible().await }));
+        result.map_err(to_py_err)
+    }
+
+    fn status(&mut self, py: Python<'_>) -> PyResult<ResourceStatus> {
+        crate::common::initialize();
+        let result = py.detach(|| self.rt.block_on(async { self.qrmi.status().await }));
         match result {
             Ok(v) => Ok(v),
             Err(e) => Err(to_py_err(e)),
@@ -245,6 +286,7 @@ impl PyQuantumResource {
                 crate::models::ResourceType::PasqalLocal => ResourceType::PasqalLocal,
                 crate::models::ResourceType::AliceBobFelis => ResourceType::AliceBobFelis,
                 crate::models::ResourceType::IQMServer => ResourceType::IQMServer,
+                crate::models::ResourceType::OQTOPUS => ResourceType::OQTOPUS,
                 crate::models::ResourceType::MaestroLocal => ResourceType::MaestroLocal,
             }),
             Err(e) => Err(to_py_err(e)),
@@ -382,6 +424,7 @@ impl PyResourceDef {
             crate::models::ResourceType::PasqalLocal => ResourceType::PasqalLocal,
             crate::models::ResourceType::AliceBobFelis => ResourceType::AliceBobFelis,
             crate::models::ResourceType::IQMServer => ResourceType::IQMServer,
+            crate::models::ResourceType::OQTOPUS => ResourceType::OQTOPUS,
             crate::models::ResourceType::MaestroLocal => ResourceType::MaestroLocal,
         }
     }
@@ -829,6 +872,9 @@ fn qrmi(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::models::Payload>()?;
     m.add_class::<crate::models::Target>()?;
     m.add_class::<crate::models::TaskResult>()?;
+    m.add_class::<crate::models::ResourceStatus>()?;
+    m.add_class::<crate::models::ResourceStatusCode>()?;
+    m.add_class::<crate::models::ResourceCapacity>()?;
     m.add_class::<PyResourceDef>()?;
     m.add_class::<PyResourceProvider>()?;
     m.add_class::<PyConfig>()?;

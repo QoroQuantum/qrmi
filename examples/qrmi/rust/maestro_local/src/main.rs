@@ -14,6 +14,7 @@ use clap::Parser;
 use dotenv::dotenv;
 use qrmi::{
     maestro::MaestroLocal, models::Payload, models::TaskStatus, QrmiError, QuantumResource,
+    ResourceStatusCode,
 };
 use std::fs::File;
 use std::io::prelude::*;
@@ -72,8 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         qrmi.resource_type().await?.as_str()
     );
 
-    let accessible = qrmi.is_accessible().await?;
-    if !accessible {
+    if qrmi.status().await?.status != ResourceStatusCode::Online {
         println!("Maestro local is not accessible"); // Checks for real QPU
     }
 

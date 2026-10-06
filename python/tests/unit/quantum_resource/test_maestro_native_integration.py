@@ -21,6 +21,7 @@ from qrmi import (
     InvalidInputError,
     ConfigError,
     UnsupportedFunctionError,
+    QrmiError,
 )
 from qrmi.maestro import payload_from_input, request_payload
 
@@ -253,7 +254,20 @@ def fixture_native_resource(tmp_path, monkeypatch, request):
                 assert time.monotonic() < deadline, "Native daemon startup timed out"
                 time.sleep(0.02)
             resource = QuantumResource("native_test", ResourceType.MaestroLocal)
-            token = resource.acquire()
+            # bind() creates the socket before listen() makes it ready. Retry
+            # only connection refusal: no session could have been allocated.
+            while True:
+                try:
+                    token = resource.acquire()
+                    break
+                except QrmiError as error:
+                    if "Connection refused" not in str(error):
+                        raise
+                    assert process.poll() is None, "Native daemon exited at startup"
+                    assert (
+                        time.monotonic() < deadline
+                    ), "Native daemon startup timed out"
+                    time.sleep(0.02)
             yield resource
         finally:
             try:

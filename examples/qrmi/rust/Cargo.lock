@@ -1788,6 +1788,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2135,8 +2145,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyo3"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd274650b21d4bfc26a0a47587962c1edb425f69287324355cd040c3ea66071c"
+dependencies = [
+ "libc",
+ "once_cell",
+ "portable-atomic",
+ "pyo3-build-config",
+ "pyo3-ffi",
+]
+
+[[package]]
+name = "pyo3-build-config"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5e2a7d2f0d013342f295c048ad19237add5154a55b1c5a254c0ec93d4109078"
+dependencies = [
+ "target-lexicon",
+]
+
+[[package]]
+name = "pyo3-ffi"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca85c467da1bbc8d866eea5deff9cf29ea5f7785054a17da36e65bda9c05845b"
+dependencies = [
+ "libc",
+ "pyo3-build-config",
+]
+
+[[package]]
+name = "pythonize"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ec376e1216e0c929a74964ce2020012a1a39f32d80e78aa688721219ea7fb89"
+dependencies = [
+ "pyo3",
+ "serde",
+]
+
+[[package]]
 name = "qrmi"
-version = "0.24.4"
+version = "0.26.0"
 dependencies = [
  "alice-bob-felis",
  "anyhow",
@@ -2151,10 +2203,12 @@ dependencies = [
  "http 1.5.0",
  "iqm-server-api",
  "libc",
+ "libloading",
  "log",
  "maestro-local-api",
  "pasqal-cloud-api",
  "pasqal-local-api",
+ "pythonize",
  "quantum-system-api",
  "quantum_compute_client",
  "reqwest-retry",
@@ -2232,6 +2286,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrmi-example-oqtopus"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dotenv",
+ "env_logger",
+ "qrmi",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "qrmi-example-pasqal-cloud"
 version = "0.3.0"
 dependencies = [
@@ -2257,6 +2323,17 @@ dependencies = [
 [[package]]
 name = "qrmi-example-provider"
 version = "0.4.0"
+dependencies = [
+ "clap",
+ "dotenv",
+ "env_logger",
+ "qrmi",
+ "tokio",
+]
+
+[[package]]
+name = "qrmi-example-resource-status"
+version = "0.1.0"
 dependencies = [
  "clap",
  "dotenv",
@@ -3107,6 +3184,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "target-lexicon"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
 name = "tempfile"

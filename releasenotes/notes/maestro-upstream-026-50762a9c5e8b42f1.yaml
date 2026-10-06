@@ -1,0 +1,17 @@
+features:
+  - |
+    Synchronize with upstream QRMI 0.26.0 while retaining Maestro Local.
+    Maestro supports configuration-map construction across Rust, Python, C
+    and Lua, with isolated socket and acquisition-token settings. Resource
+    status uses the existing local-server PING behavior.
+upgrade:
+  - |
+    Rebuild QRMI bindings and C/Lua/Slurm consumers together. To preserve
+    upstream OQTOPUS values, Maestro's resource type changes from 7 to 8 and
+    its C payload tag changes from 4 to 5. The Maestro server protocol is
+    unchanged.
+fixes:
+  - |
+    Preserve Maestro payload validation exclusions when adding the upstream
+    OQTOPUS schema branch, preventing malformed Maestro requests from passing
+    validation through an unrelated job_spec field.
