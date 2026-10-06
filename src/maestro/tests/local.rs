@@ -194,8 +194,20 @@ fn explicit_config_is_isolated_from_environment() {
 fn config_factory_preserves_session_and_status_behavior() {
     let _lock = ENV_LOCK.lock().unwrap();
     let server = Server::new(&[
+        (
+            "API {\"version\":2,\"command\":\"status\"}",
+            "ERROR Unknown command",
+        ),
         ("PING", "OK YES"),
+        (
+            "API {\"version\":2,\"command\":\"status\"}",
+            "ERROR Unknown command",
+        ),
         ("PING", "OK NO"),
+        (
+            "API {\"version\":2,\"command\":\"status\"}",
+            "ERROR Unknown command",
+        ),
         ("PING", "ERROR unavailable"),
         ("SESSION 42 EXISTS", "OK YES"),
         ("SESSION 42 DELETE", "OK YES"),
@@ -699,7 +711,15 @@ fn failed_and_missing_tasks_are_not_reported_as_cancelled() {
 fn service_discovers_maestro_filters_unavailable_resources_and_keeps_session() {
     let _lock = ENV_LOCK.lock().unwrap();
     let server = Server::new(&[
+        (
+            "API {\"version\":2,\"command\":\"status\"}",
+            "ERROR Unknown command",
+        ),
         ("PING", "OK YES"),
+        (
+            "API {\"version\":2,\"command\":\"status\"}",
+            "ERROR Unknown command",
+        ),
         ("PING", "OK NO"),
         ("SESSION CREATE", "OK 42"),
         ("SESSION 42 EXISTS", "OK YES"),
@@ -818,6 +838,10 @@ fn resource_keeps_one_socket_and_native_submission_clears_reused_status() {
         "API {{\"version\":2,\"command\":\"submit\",\"session_id\":5,\"request\":{input}}}"
     );
     let original = Server::new(&[
+        (
+            "API {\"version\":2,\"command\":\"status\"}",
+            "ERROR Unknown command",
+        ),
         ("PING", "OK"),
         ("SESSION CREATE", "OK 5"),
         (
@@ -877,4 +901,67 @@ fn resource_keeps_one_socket_and_native_submission_clears_reused_status() {
     block_on(qrmi.release(&token)).unwrap();
     original.assert_done();
     other.assert_done();
+}
+
+#[test]
+fn resource_status_reports_queue_without_acquiring_and_keeps_failures_visible() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    const COMMAND: &str = "API {\"version\":2,\"command\":\"status\"}";
+    for (accepting, healthy, reason) in [
+        (true, true, None),
+        (false, false, Some("runner_not_running")),
+    ] {
+        let response = format!(
+            "OK {}",
+            serde_json::json!({"version":2,"ok":true,"status":{
+            "accepting_jobs":accepting,"healthy":healthy,"busy":true,
+            "pending_job_count":3,"status_reason":reason}})
+        );
+        let server = Server::new(&[(COMMAND, &response)]);
+        let mut resource = MaestroLocal::new("status_test").unwrap();
+        let status = block_on(resource.status()).unwrap();
+        assert_eq!(
+            status.status == crate::models::ResourceStatusCode::Online,
+            accepting
+        );
+        assert_eq!(status.healthy, Some(healthy));
+        assert_eq!(status.busy, Some(true));
+        assert_eq!(status.pending_job_count, Some(3));
+        assert_eq!(status.status_reason.as_deref(), reason);
+        assert_eq!(status.capacity, None);
+        server.assert_done();
+    }
+    for response in [
+        "OK {\"version\":2,\"ok\":true}",
+        "OK {\"version\":2,\"ok\":true,\"status\":{\"accepting_jobs\":true,\"healthy\":true,\"busy\":false,\"pending_job_count\":-1}}",
+        "OK {\"version\":2,\"ok\":false,\"error\":{\"code\":\"native_failure\",\"message\":\"broken\"}}",
+        "OK {\"version\":3,\"ok\":true}",
+        "OK not-json", "ERROR internal failure",
+    ] {
+        let server = Server::new(&[(COMMAND, response)]);
+        assert!(block_on(MaestroLocal::new("status_test").unwrap().status()).is_err());
+        server.assert_done();
+    }
+    let server = Server::new(&[
+        (COMMAND, "OK {\"version\":2,\"ok\":false,\"error\":{\"code\":\"unsupported_operation\",\"message\":\"Unknown API command\"}}"),
+        ("PING", "OK"),
+    ]);
+    let status = block_on(MaestroLocal::new("status_test").unwrap().status()).unwrap();
+    assert_eq!(status.healthy, None);
+    assert_eq!(status.busy, None);
+    assert_eq!(status.pending_job_count, None);
+    server.assert_done();
+    let resource = MaestroLocal::from_config(
+        "status_test",
+        std::collections::HashMap::from([(
+            "QRMI_MAESTRO_SOCKET".into(),
+            "/nonexistent/maestro-status.sock".into(),
+        )]),
+    )
+    .unwrap();
+    assert!(block_on({
+        let mut resource = resource;
+        async move { resource.status().await }
+    })
+    .is_err());
 }

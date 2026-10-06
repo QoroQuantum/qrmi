@@ -253,6 +253,7 @@ impl ResourceType {
             "config",
         ];
         const FOREIGN: &[&str] = &[
+            "job_spec",
             "program_id",
             "parameters",
             "job_runs",

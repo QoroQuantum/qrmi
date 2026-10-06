@@ -11,7 +11,9 @@
 // that they have been altered from the originals.
 
 use crate::common::resolve_opt;
-use crate::models::{Payload, ResourceType, Target, TaskResult, TaskStatus};
+use crate::models::{
+    Payload, ResourceStatus, ResourceStatusCode, ResourceType, Target, TaskResult, TaskStatus,
+};
 use crate::{QrmiError, QuantumResource, Result};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -199,6 +201,22 @@ impl QuantumResource for MaestroLocal {
 
     async fn resource_type(&mut self) -> Result<ResourceType> {
         Ok(ResourceType::MaestroLocal)
+    }
+
+    async fn status(&mut self) -> Result<ResourceStatus> {
+        let status = self.native_api(|client| client.status()).await?;
+        Ok(ResourceStatus {
+            status: if status.accepting_jobs {
+                ResourceStatusCode::Online
+            } else {
+                ResourceStatusCode::Offline
+            },
+            status_reason: status.reason,
+            healthy: status.healthy,
+            busy: status.busy,
+            pending_job_count: status.pending_job_count,
+            capacity: None,
+        })
     }
 
     async fn is_accessible(&mut self) -> Result<bool> {

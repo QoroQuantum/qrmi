@@ -864,3 +864,100 @@ def test_real_mpi_gpu_execution(native_resource, noisy):
     assert result["execution_metadata"]["backend"] == "distributed_mpi_gpu"
     assert result["mpi"]["ranks"] == 2
     assert result["counts"] == {("00" if noisy else "10"): 16}
+
+
+@pytest.mark.parametrize("backend", ["qcsim", "gpu"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "mps-operators",
+        "mpo-operators",
+        "tensor-batch",
+        "tensor-expectations",
+        "tensor-bulk",
+        "mpo-wide",
+    ],
+)
+def test_current_tensor_examples_through_qrmi(native_resource, name, backend):
+    """Preserve ordered operators, complex scale, bit order and fusion metadata."""
+    if backend == "gpu" and os.environ.get("QRMI_TEST_GPU") != "1":
+        pytest.skip("set QRMI_TEST_GPU=1 with an available GPU plugin")
+    document = json.loads((EXAMPLES / f"native-{name}.json").read_text())
+    document["simulator"]["backend"] = backend
+    task = native_resource.task_start(request_payload(document))
+    assert await_task(native_resource, task) == TaskStatus.Completed
+    result = json.loads(native_resource.task_result(task).value)
+    if name == "mps-operators":
+        assert result["operator_expectation"] == pytest.approx([0, -1])
+    elif name == "mpo-operators":
+        assert result["trace"] == pytest.approx([4, 0])
+        assert result["element"] == pytest.approx([4, 0])
+        for field, scale in [
+            ("expectations_complex", 1),
+            ("unnormalized_expectations", 4),
+        ]:
+            assert len(result[field]) == 3
+            for actual, expected in zip(result[field], [-scale, scale, -scale]):
+                assert actual == pytest.approx([expected, 0])
+        for field, scale in [("density_matrix", 1), ("unnormalized_density_matrix", 4)]:
+            assert result[field]["dimension"] == 4
+            assert len(result[field]["row_major"]) == 16
+            for index, value in enumerate(result[field]["row_major"]):
+                assert value == pytest.approx([scale if index == 10 else 0, 0])
+    elif name == "tensor-batch":
+        assert result["steps"] == [0, 1, 2]
+        assert len(result["expectation_values"]) == 3
+        for values, expected in zip(result["expectation_values"], [1, -1, 1]):
+            assert values == pytest.approx([expected, 1, expected])
+    elif name == "tensor-expectations":
+        assert result["expectation_values"] == pytest.approx([-1, 1, -1])
+    elif name == "tensor-bulk":
+        assert result["basis_states"] == [0, 1, 2, 3]
+        for index, amplitude in enumerate(result["amplitudes"]):
+            assert amplitude == pytest.approx([1 if index == 1 else 0, 0])
+        assert result["execution_metadata"]["gate_fusion"]["requested"] is True
+        document["operation"] = "probabilities"
+        task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        assert json.loads(native_resource.task_result(task).value)[
+            "probabilities"
+        ] == pytest.approx([0, 1, 0, 0])
+    elif name == "mpo-wide":
+        assert result["probability"] == pytest.approx(1)
+        target = document.pop("target_state")
+        document["operation"] = "execute"
+        document["execution"]["shots"] = 3
+        document["circuit"][
+            "source"
+        ] = "OPENQASM 2.0; qreg q[65]; creg c[65]; x q[0]; x q[64]; measure q->c;"
+        task = native_resource.task_start(request_payload(document))
+        assert await_task(native_resource, task) == TaskStatus.Completed
+        assert json.loads(native_resource.task_result(task).value)["counts"] == {
+            target: 3
+        }
+
+
+def test_status_and_current_capabilities_through_qrmi(native_resource):
+    """Expose server health and native discovery without dropping additive fields."""
+    status = native_resource.status()
+    assert status.healthy is True
+    assert status.busy is False
+    assert status.pending_job_count == 0
+    assert status.capacity is None
+    caps = json.loads(native_resource.target().value)
+    assert "status" in caps["server"]["commands"]
+    assert caps["server"]["build"]["source_revision"]
+    assert caps["native"]["build"]["source_revision"]
+    assert caps["native"]["capability_scope"] == "validation"
+    diagnostics = {entry["name"]: entry for entry in caps["native"]["diagnostics"]}
+    assert {"backend": "qcsim", "method": "matrix_product_state"} in diagnostics[
+        "operator_expectation"
+    ]["supported_configurations"]
+    options = {entry["name"]: entry for entry in caps["native"]["options"]}
+    assert options["precision"]["enum"] == ["single", "double"]
+    assert options["pp_workers"]["maximum"] == 1024
+    assert "use_double_precision" not in options
+    document = json.loads((EXAMPLES / "native-tensor-bulk.json").read_text())
+    document["simulator"]["options"] = {"mps_measure_no_collapse": True}
+    with pytest.raises(InvalidInputError, match="Unknown simulator option"):
+        native_resource.task_start(request_payload(document))

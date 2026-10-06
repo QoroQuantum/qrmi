@@ -2,6 +2,8 @@
 
 > This report records the pre-implementation source analysis. The approved changes and validation results are now recorded in [the implementation plan](maestro-implementation-plan.md); usage is documented in [the native API guide](maestro-native-api.rst). Source line references below describe the original snapshot.
 
+> Historical option names below, including `use_double_precision`, may be rejected by current native schema 2 builds. Use the migration table in [the native API guide](maestro-native-api.rst).
+
 Analysis date: 2026-09-16. This is an implementation proposal based on source inspection, not a record of implemented or tested changes.
 
 The review covers the QRMI interfaces and other vendor implementations, its Maestro socket client, the local server and worker, Maestro's C ABI, Python bindings, simulator adapters, noise code, and relevant existing tests. No builds, simulations, daemon requests, deployments, or implementation changes were performed for this report.

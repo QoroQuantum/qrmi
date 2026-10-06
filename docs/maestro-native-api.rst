@@ -14,7 +14,9 @@ The server uses only Rust/C/C++; Python is an optional client interface.
 See the :download:`review fix plan and results <maestro-review-fix-plan.md>` for the completed
 cross-project fixes, regression coverage and hardware verification limits. The :download:`second review plan and results <maestro-review-round2-plan.md>` records the subsequent
 cancellation, transport, payload and test-coverage changes. The :download:`third review plan and results <maestro-review-round3-plan.md>` covers composed failure diagnostics,
-operation-specific shots, Python input errors and examples.
+operation-specific shots, Python input errors and examples. The
+:download:`native refresh plan and results <maestro-native-refresh-plan.md>` records
+the tensor, status and capability-discovery update.
 
 Python client
 -------------
@@ -318,3 +320,103 @@ binding, the MPI GPU plugin/license and CUDA-aware MPI to run ideal and noisy
 CPU MPI test alone does not verify GPU distribution. The live legacy suite in
 ``python/tests/integration/quantum_resource/test_maestro_live.py`` requires
 ``QRMI_TEST_MAESTRO_LIVE=1`` and skips backend cases absent from the capability catalog.
+
+Current tensor requests and option migration
+--------------------------------------------
+
+Native schema version 2 identifies the document format, not a Maestro release.
+After an upgrade, inspect ``json.loads(resource.target().value)`` again. The
+``native.options`` catalog lists current names, types, applicability and, on newer
+builds, ``enum`` choices, bounds and ``supported_configurations``. Conditional
+``exceptions`` override general bounds (MPO accepts zero for unlimited bond
+size); ``constraints`` narrow choices for particular backends. Validation remains
+authoritative, including cross-field rules and output limits.
+
+The following native JSON options have changed:
+
+.. list-table:: Native option migration
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Previous option
+     - Current option
+   * - ``use_double_precision``
+     - ``precision: "double"`` or ``"single"``
+   * - ``mps_measure_no_collapse`` / ``mps_sample_measure_algorithm``
+     - ``mps_sampling: "probabilities"`` or ``"apply_measure"``
+   * - ``mps_use_gesvd*``, ``mpo_use_gesvd*``, ``tensor_network_use_gesvd*``
+     - Corresponding ``*_svd_solver`` with ``gesvd``, ``gesvdj``, ``gesvdp`` or ``gesvdr``
+   * - ``pp_pauli_weight_threshold``
+     - ``pp_max_pauli_weight``
+   * - ``pp_steps_between_trims``
+     - ``pp_gates_between_trims``
+   * - ``pp_steps_between_deduplications``
+     - ``pp_gates_between_deduplications``
+
+For boolean sampling migration, true becomes ``probabilities`` and false becomes
+``apply_measure``. The former sampling strings ``mps_probabilities`` and
+``mps_apply_measure`` lose their prefix. Select the SVD solver whose former flag
+was true; omit the selector if all flags were false. Do not send both old and new
+keys. QCSim computes in double precision; precision/SVD selections apply only to
+backends advertised by the catalog. CPU Pauli propagation also accepts
+``pp_workers`` (0 through 1024) and nonnegative ``pp_sampling_cache_nodes``.
+
+QRMI does not translate these options. Removed keys fail native validation before
+allocation of a task ID. Legacy ``SET_OPTIONS`` uses a separate contract; keys
+accepted there are not necessarily valid under native ``simulator.options``.
+
+The ``examples/task_runner/maestro_local`` directory contains complete native
+requests suitable for either task runner or ``request_payload``:
+
+* ``native-mps-operators.json`` evaluates ordered, read-only MPS operators and
+  exercises routing and maintenance. Repeated targets retain their order: X then
+  Y on qubit zero of the zero state returns ``[0, -1]`` because YX = -iZ.
+* ``native-mpo-operators.json`` applies an operator to an MPO and compares raw and
+  normalized complex expectations and dense matrices. ``normalize: false`` keeps
+  the scale of A rho A-dagger; these operators change the state.
+* ``native-tensor-expectations.json`` evaluates repeated, asymmetric Pauli
+  observables in a single estimate request.
+* ``native-tensor-batch.json`` preserves repeated observable order over successive
+  evolution steps. Native batching shares prepared-state work; QRMI should not
+  split these observables into independent jobs.
+* ``native-tensor-bulk.json`` reads amplitudes in logical basis order and returns
+  ``execution_metadata.gate_fusion`` alongside the numerical results.
+* ``native-mpo-wide.json`` queries a 65-qubit product state using a bitstring.
+  Wide measurement results also retain string keys rather than integer conversion.
+
+Pauli strings put qubit zero first; Qiskit Pauli labels require reversal when
+constructing these native observables. Basis integers put qubit zero in the least
+significant bit. Test asymmetric states/observables when converting conventions.
+Complex results use ``[real, imaginary]``. Full vectors and matrices still grow
+exponentially: bounded GPU staging memory does not remove native output limits
+or the socket's 64 MiB response bound.
+
+Resource status and deployment discovery
+----------------------------------------
+
+``resource.status()`` uses the additive server API v2 ``status`` command on a
+blocking executor. It creates no session and does not renew any session lease.
+It reports Online when the runner is live, its state is usable and shutdown has
+not begun; otherwise it reports Offline with a reason. ``healthy`` describes the
+runner, ``busy`` means active or queued execution, and ``pending_job_count`` counts
+waiting jobs, excluding the active job. These snapshots can change immediately.
+
+Capacity remains unspecified: an execution worker is not an exclusive acquisition
+slot. Runner health does not certify GPU availability, licensing or plugin
+compatibility. Older servers with an unsupported status command fall back to
+``PING`` with health, occupancy and queue length unknown. Transport errors,
+malformed replies and other server failures remain errors.
+
+New catalogs include ``server.build`` and ``native.build`` with version and source
+revision, plus ``native.diagnostics`` with supported backend/method pairs.
+``native.capability_scope: "validation"`` distinguishes parser support from
+runtime readiness. Missing optional GPU exports can still make a validated job
+fail. Older catalogs may omit these additive fields.
+
+Rebuild and deploy compatible Maestro, GPU plugin and server artifacts together,
+then restart the service to load them. Install both Maestro's ``Interface.h`` and
+``InterfaceTypes.h``. Build identifiers describe the build inputs (the native
+revision is captured at CMake configuration); source archives may report
+``unknown``, and modified tracked sources carry a ``-dirty`` suffix. They are
+informational, not a feature-negotiation mechanism. QRMI forwards catalog and
+result additions without a new payload type or C ABI change.

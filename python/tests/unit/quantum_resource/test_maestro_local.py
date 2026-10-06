@@ -127,7 +127,9 @@ def test_config_preserves_socket_session_and_status(server, monkeypatch):
     )
     server.extend(
         [
+            ('API {"version":2,"command":"status"}', "ERROR Unknown command"),
             ("PING", "OK YES"),
+            ('API {"version":2,"command":"status"}', "ERROR Unknown command"),
             ("PING", "OK NO"),
             ("SESSION 42 EXISTS", "OK YES"),
             ("SESSION 42 DELETE", "OK YES"),
@@ -165,7 +167,9 @@ def test_service_preserves_maestro_session(server, monkeypatch):
     monkeypatch.setenv("QRMI_JOB_QPU_TYPES", "maestro-local,maestro-local")
     server.extend(
         [
+            ('API {"version":2,"command":"status"}', "ERROR Unknown command"),
             ("PING", "OK YES"),
+            ('API {"version":2,"command":"status"}', "ERROR Unknown command"),
             ("PING", "OK NO"),
             ("SESSION CREATE", "OK 42"),
             ("SESSION 42 EXISTS", "OK YES"),
@@ -296,7 +300,14 @@ def test_c_service_discovers_maestro(c_api, server, monkeypatch):
     """Return accessible Maestro resources through the shared C service."""
     monkeypatch.setenv("QRMI_JOB_QPU_RESOURCES", "py_maestro,offline_maestro")
     monkeypatch.setenv("QRMI_JOB_QPU_TYPES", "maestro-local,maestro-local")
-    server.extend([("PING", "OK YES"), ("PING", "OK NO")])
+    server.extend(
+        [
+            ('API {"version":2,"command":"status"}', "ERROR Unknown command"),
+            ("PING", "OK YES"),
+            ('API {"version":2,"command":"status"}', "ERROR Unknown command"),
+            ("PING", "OK NO"),
+        ]
+    )
     resources = _Resources()
     assert c_api.qrmi_service_resources(ctypes.byref(resources)) == 0
     try:

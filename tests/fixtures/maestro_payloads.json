@@ -295,5 +295,66 @@
       "simulation_method": 0
     },
     "valid": false
+  },
+  {
+    "name": "oqtopus_field_bare",
+    "input": {
+      "schema_version": 2,
+      "operation": "execute",
+      "circuit": {
+        "num_qubits": 1,
+        "source": "OPENQASM 2.0; qreg q[1];"
+      },
+      "job_spec": "{}"
+    },
+    "valid": false
+  },
+  {
+    "name": "oqtopus_field_wrapped",
+    "input": {
+      "request": {
+        "schema_version": 2,
+        "operation": "execute",
+        "circuit": {
+          "num_qubits": 1,
+          "source": "OPENQASM 2.0; qreg q[1];"
+        },
+        "job_spec": "{}"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "oqtopus_field_wrapped_string",
+    "input": {
+      "request": "{\"schema_version\": 2, \"operation\": \"execute\", \"circuit\": {\"num_qubits\": 1, \"source\": \"OPENQASM 2.0; qreg q[1];\"}, \"job_spec\": \"{}\"}"
+    },
+    "valid": false,
+    "schema_valid": true
+  },
+  {
+    "name": "oqtopus_field_envelope",
+    "input": {
+      "job_type": "request",
+      "input": {
+        "schema_version": 2,
+        "operation": "execute",
+        "circuit": {
+          "num_qubits": 1,
+          "source": "OPENQASM 2.0; qreg q[1];"
+        },
+        "job_spec": "{}"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "oqtopus_field_envelope_string",
+    "input": {
+      "job_type": "request",
+      "input": "{\"schema_version\": 2, \"operation\": \"execute\", \"circuit\": {\"num_qubits\": 1, \"source\": \"OPENQASM 2.0; qreg q[1];\"}, \"job_spec\": \"{}\"}"
+    },
+    "valid": false,
+    "schema_valid": true
   }
 ]

@@ -30,6 +30,16 @@ impl std::fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
+/// Server runner status; device readiness and acquisition capacity are unknown.
+#[derive(Debug, Clone)]
+pub struct Status {
+    pub accepting_jobs: bool,
+    pub healthy: Option<bool>,
+    pub busy: Option<bool>,
+    pub pending_job_count: Option<u64>,
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Client {
     socket: PathBuf,
@@ -119,6 +129,59 @@ impl Client {
     pub fn logs(&self, session_id: u32, task_id: u32) -> Result<String, Error> {
         self.call(json::object! { version: VERSION, command: "logs", session_id: session_id, task_id: task_id })
             .map(|value| value.dump())
+    }
+
+    /// Queries status without creating or renewing a session. Only an explicitly
+    /// unsupported command falls back to legacy PING; failures stay visible.
+    pub fn status(&self) -> Result<Status, Error> {
+        let response = maestro_lib::exchange(
+            &self.socket,
+            &format!(
+                "API {}\n",
+                json::object! {version: VERSION, command: "status"}.dump()
+            ),
+        )
+        .map_err(|error| Error::new("transport", error.to_string()))?;
+        let parsed = parse_response(&response);
+        if response.trim() == "ERROR Unknown command"
+            || parsed
+                .as_ref()
+                .is_err_and(|error| error.code == "unsupported_operation")
+        {
+            let ping = maestro_lib::exchange(&self.socket, "PING\n")
+                .map_err(|error| Error::new("transport", error.to_string()))?;
+            let accepting_jobs = match ping.trim() {
+                "OK" | "OK YES" => true,
+                "OK NO" => false,
+                _ => {
+                    return Err(Error::new(
+                        "protocol",
+                        format!("Invalid legacy PING response: {}", ping.trim()),
+                    ));
+                }
+            };
+            return Ok(Status {
+                accepting_jobs,
+                healthy: None,
+                busy: None,
+                pending_job_count: None,
+                reason: None,
+            });
+        }
+        let value = parsed?;
+        let status = &value["status"];
+        let malformed = || Error::new("protocol", "Invalid server status response");
+        let reason = match &status["status_reason"] {
+            json::JsonValue::Null => None,
+            value => Some(value.as_str().ok_or_else(malformed)?.to_owned()),
+        };
+        Ok(Status {
+            accepting_jobs: status["accepting_jobs"].as_bool().ok_or_else(malformed)?,
+            healthy: Some(status["healthy"].as_bool().ok_or_else(malformed)?),
+            busy: Some(status["busy"].as_bool().ok_or_else(malformed)?),
+            pending_job_count: Some(status["pending_job_count"].as_u64().ok_or_else(malformed)?),
+            reason,
+        })
     }
 
     pub fn keepalive(&self, session_id: u32) -> Result<(), Error> {

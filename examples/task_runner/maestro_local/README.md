@@ -134,3 +134,23 @@ The MPI example's `launch` field is interpreted by the local server and is rejec
 by the standalone CLI. Tests validate all eight computational documents and run
 the six CPU examples through a private native server with result assertions. GPU
 validation does not establish device, allocation or license availability.
+
+## Current tensor examples
+
+The following native schema 2 documents work through `request_payload(document)`
+and either task runner, using symbolic backend/method names:
+
+| File | Purpose |
+| --- | --- |
+| `native-mps-operators.json` | Ordered MPS operator expectation, routing and maintenance |
+| `native-mpo-operators.json` | MPO state updates and normalized/raw complex results |
+| `native-tensor-expectations.json` | Batched estimates with repeated asymmetric observables |
+| `native-tensor-batch.json` | Repeated observables at successive evolution steps |
+| `native-tensor-bulk.json` | Bulk amplitudes and gate-fusion metadata |
+| `native-mpo-wide.json` | A 65-qubit MPO probability using a bitstring |
+
+These use QCSim by default. GPU support depends on matching Maestro/plugin builds
+and runtime availability. Consult `target()` after upgrades: schema version 2
+alone does not identify supported options. See the
+[native API guide](../../../docs/maestro-native-api.rst) for option migration,
+ordering conventions, output limits and resource-status semantics.

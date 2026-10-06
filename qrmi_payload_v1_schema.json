@@ -440,6 +440,11 @@
             "required": [
               "tag"
             ]
+          },
+          {
+            "required": [
+              "job_spec"
+            ]
           }
         ]
       }

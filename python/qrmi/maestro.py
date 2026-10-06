@@ -17,6 +17,7 @@ _LEGACY_FIELDS = {
     "config",
 }
 _FOREIGN_FIELDS = {
+    "job_spec",
     "program_id",
     "parameters",
     "job_runs",

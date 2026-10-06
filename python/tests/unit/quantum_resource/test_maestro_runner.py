@@ -166,7 +166,9 @@ def test_shared_payload_contract_cases():
     validator = jsonschema.Draft202012Validator(schema)
     cases = json.loads((root / "tests/fixtures/maestro_payloads.json").read_text())
     for case in cases:
-        assert validator.is_valid(case["input"]) == case["valid"], case["name"]
+        assert validator.is_valid(case["input"]) == case.get(
+            "schema_valid", case["valid"]
+        ), case["name"]
         if case["valid"]:
             payload = payload_from_input(case["input"])
             assert json.loads(payload.config) == json.loads(case["config"]), case[
