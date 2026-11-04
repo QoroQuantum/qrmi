@@ -1,0 +1,37 @@
+features:
+  - |
+    Maestro Local documents, exemplifies and tests the native mixed-state
+    queries ``density_matrix_overlap`` and ``fidelity_with_statevector`` on
+    ``density_matrix`` and ``matrix_product_operator``. They use the existing
+    ``request`` payload. A new example, ``native-mixed-state.json``, batches
+    both.
+upgrade:
+  - |
+    The mixed-state queries and the refusal of ``readout_error`` on
+    ``checkpoint_batch`` prefix measurements need a matching Maestro library;
+    older libraries reject the queries before allocating a task.
+fixes:
+  - |
+    Maestro Local waits up to 60 seconds for the server to acknowledge a task
+    cancellation or session deletion, which it does only after stopping the
+    task's worker; MPI cleanup may take 25 seconds. With the previous 15-second
+    timeout, a successful cancellation could be reported as a failure followed
+    by ``TaskNotFound``.
+  - |
+    ``task_status`` reports ``Cancelled``, and ``task_stop`` succeeds, for a
+    Maestro task that no longer exists when the server's retained diagnostics
+    end with a confirmed cancellation, for example one made by another client.
+    Task runners previously retried ``TaskNotFound`` for such tasks
+    indefinitely. Other missing tasks remain ``TaskNotFound``.
+  - |
+    Maestro Local runs its blocking socket exchanges, including acquisition,
+    status, results and cancellation, off the asynchronous executor, as it
+    already did for native API calls.
+  - |
+    The C binding no longer dereferences NULL Maestro payload strings. NULL
+    ``observables`` and ``config`` select ``""`` and ``{}``; NULL ``input`` or
+    ``job_type`` is refused as invalid input before contacting the server.
+  - |
+    The Lua binding rejects legacy Maestro ``qubits``, ``simulator_type`` and
+    ``simulation_method`` values outside ``0..4294967295`` instead of silently
+    truncating them to 32 bits.
