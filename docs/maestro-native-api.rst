@@ -336,10 +336,9 @@ binding, the MPI GPU plugin/license and CUDA-aware MPI to run ideal and noisy
 ``distributed_mpi_gpu`` cases. Those tests assert the actual backend and rank count; the
 CPU MPI test alone does not verify GPU distribution. Set
 ``QRMI_REQUIRE_MAESTRO_NATIVE=1`` to make a missing daemon or ``maestro-request``
-fail these tests instead of skipping them. The ``Maestro native integration``
-workflow does this on CPU against the Maestro and local-server commits pinned in
-``.github/workflows/maestro-native.yml``; it needs the ``MAESTRO_LOCAL_SERVER_TOKEN``
-secret to read the private server repository. The live legacy suite in
+fail these tests instead of skipping them. The Maestro local server's CI does this
+on CPU: it builds the server against its pinned Maestro and runs this suite from a
+pinned QRMI commit, which needs no stored credentials. The live legacy suite in
 ``python/tests/integration/quantum_resource/test_maestro_live.py`` requires
 ``QRMI_TEST_MAESTRO_LIVE=1`` and skips backend cases absent from the capability catalog.
 

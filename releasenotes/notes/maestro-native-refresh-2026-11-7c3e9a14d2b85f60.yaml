@@ -37,6 +37,6 @@ fixes:
     PING-only.
 other:
   - |
-    A CPU workflow now runs the native Maestro integration suite against pinned
-    Maestro and local-server commits, with ``QRMI_REQUIRE_MAESTRO_NATIVE=1`` so
-    that a missing native binary fails rather than skips.
+    The native Maestro integration tests accept ``QRMI_REQUIRE_MAESTRO_NATIVE=1``
+    so that a missing native binary fails rather than skips. The Maestro local
+    server's CI runs them on CPU against a pinned QRMI commit.
