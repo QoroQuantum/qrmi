@@ -21,6 +21,8 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
 
+mod maestro;
+
 #[cfg(test)]
 mod tests;
 
@@ -1718,7 +1720,7 @@ pub unsafe extern "C" fn qrmi_resource_task_start(
         return ReturnCode::NullPointerError;
     }
 
-    let mut qrmi_payload: Option<crate::models::Payload> = None;
+    let mut qrmi_payload: Option<crate::models::Payload> = maestro::payload_from_c(&*payload);
     if let Payload::QiskitPrimitive { input, program_id } = *payload {
         if let (Ok(program_id_str), Ok(input_str)) = (
             CStr::from_ptr(program_id).to_str(),
@@ -1782,32 +1784,6 @@ pub unsafe extern "C" fn qrmi_resource_task_start(
         if let Ok(job_spec_str) = CStr::from_ptr(job_spec).to_str() {
             qrmi_payload = Some(crate::models::Payload::Oqtopus {
                 job_spec: job_spec_str.to_string(),
-            });
-        }
-    } else if let Payload::MaestroLocal {
-        input,
-        job_type,
-        qubits,
-        simulator_type,
-        simulation_method,
-        observables,
-        config,
-    } = *payload
-    {
-        if let (Ok(input_str), Ok(job_type_str), Ok(observables_str), Ok(config_str)) = (
-            CStr::from_ptr(input).to_str(),
-            CStr::from_ptr(job_type).to_str(),
-            CStr::from_ptr(observables).to_str(),
-            CStr::from_ptr(config).to_str(),
-        ) {
-            qrmi_payload = Some(crate::models::Payload::MaestroLocal {
-                input: input_str.to_string(),
-                job_type: job_type_str.to_string(),
-                qubits,
-                simulator_type,
-                simulation_method,
-                observables: observables_str.to_string(),
-                config: config_str.to_string(),
             });
         }
     }

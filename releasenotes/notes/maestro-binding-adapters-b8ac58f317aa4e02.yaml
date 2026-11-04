@@ -1,0 +1,6 @@
+other:
+  - |
+    Isolate the Maestro C and Lua payload adapters and restore the shared Lua
+    binding's upstream layout to reduce future merge conflicts. Public payload
+    layouts and behavior are unchanged. Manual Lua builds must compile both
+    ``lua_qrmi.c`` and ``maestro_local.c``; CMake includes both automatically.

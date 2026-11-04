@@ -251,6 +251,7 @@ References and Acknowledgements
    :hidden:
    
    development/CONTRIBUTING
+   development/UPSTREAM_SYNC
    development/TESTING
    development/DOCUMENTATION
    development/RELEASE_DEPLOYMENT

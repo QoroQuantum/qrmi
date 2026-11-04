@@ -151,7 +151,8 @@ jobs:
 
   deploy:
     if: github.event_name == 'push' &&
-        github.ref == 'refs/heads/main'
+        github.ref == 'refs/heads/main' &&
+        (github.repository == 'qiskit-community/qrmi' || vars.QRMI_DEPLOY_PAGES == 'true')
 
     environment:
       name: github-pages

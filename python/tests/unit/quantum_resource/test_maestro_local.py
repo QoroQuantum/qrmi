@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import socket
+import subprocess
 import tempfile
 import threading
 from collections import deque
@@ -159,6 +160,51 @@ def test_provider_values_preserve_upstream_abi():
     """OQTOPUS keeps the upstream value; Maestro moves after it."""
     assert int(ResourceType.OQTOPUS) == 7
     assert int(ResourceType.MaestroLocal) == 8
+
+
+@pytest.mark.parametrize("mode", ["execute", "estimate"])
+def test_lua_maestro_payload_dispatch(server, monkeypatch, mode):
+    """Exercise the Lua/C adapters, defaults, errors and detached sessions."""
+    module = os.environ.get("QRMI_TEST_LUA_MODULE")
+    executable = os.environ.get("QRMI_TEST_LUA")
+    if not module or not executable:
+        pytest.skip("set QRMI_TEST_LUA_MODULE and QRMI_TEST_LUA for Lua checks")
+    monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "8")
+    server.extend(
+        [
+            ("SESSION 8 EXISTS", "OK YES"),
+            ("SESSION 8 TASK CREATE", "OK 1"),
+            (f"SESSION 8 TASK 1 SET_TYPE {mode.upper()}", "OK YES"),
+        ]
+    )
+    if mode == "estimate":
+        server.append(("SESSION 8 TASK 1 SET_OBSERVABLES Z", "OK YES"))
+    simulator, method, config = (
+        (2, 3, '{"shots":8}') if mode == "estimate" else (0, 0, "{}")
+    )
+    server.extend(
+        [
+            ("SESSION 8 TASK 1 SET_QUBITS 1", "OK YES"),
+            (f"SESSION 8 TASK 1 SET_SIM_TYPE {simulator}", "OK YES"),
+            (f"SESSION 8 TASK 1 SET_METHOD {method}", "OK YES"),
+            ("SESSION 8 TASK 1 SET_QASM OPENQASM 2.0; qreg q[1];", "OK YES"),
+            (f"SESSION 8 TASK 1 SET_OPTIONS {config}", "OK YES"),
+            ("SESSION 8 TASK 1 EXECUTE", "OK YES"),
+            ("SESSION 8 DELETE", "OK YES"),
+        ]
+    )
+    script = (
+        Path(__file__).resolve().parents[4] / "lua/tests/maestro_local.lua"
+    ).read_text(encoding="utf-8")
+    result = subprocess.run(
+        [executable, "-", mode],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_service_preserves_maestro_session(server, monkeypatch):
