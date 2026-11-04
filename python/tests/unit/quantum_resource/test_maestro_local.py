@@ -16,6 +16,7 @@ from qrmi import (
     ConfigError,
     InvalidInputError,
     Payload,
+    QrmiError,
     QRMIService,
     QuantumResource,
     ResourceType,
@@ -262,6 +263,29 @@ class _Resources(ctypes.Structure):
     ]
 
 
+class _MaestroBody(ctypes.Structure):  # pylint: disable=too-few-public-methods
+    """QrmiPayload_MaestroLocal_Body."""
+
+    _fields_ = [
+        ("input", ctypes.c_char_p),
+        ("job_type", ctypes.c_char_p),
+        ("qubits", ctypes.c_uint32),
+        ("simulator_type", ctypes.c_uint32),
+        ("simulation_method", ctypes.c_uint32),
+        ("observables", ctypes.c_char_p),
+        ("config", ctypes.c_char_p),
+    ]
+
+
+class _Payload(ctypes.Structure):  # pylint: disable=too-few-public-methods
+    """QrmiPayload with its QRMI_PAYLOAD_MAESTRO_LOCAL variant."""
+
+    _fields_ = [("tag", ctypes.c_int), ("maestro", _MaestroBody)]
+
+
+QRMI_PAYLOAD_MAESTRO_LOCAL = 5
+
+
 @pytest.fixture(name="c_api")
 def fixture_c_api():
     """Opt in with QRMI_TEST_LIBRARY pointing to the matching C library."""
@@ -295,6 +319,14 @@ def fixture_c_api():
         "qrmi_string_free": ([ctypes.c_void_p], ctypes.c_int),
         "qrmi_service_resources": ([ctypes.POINTER(_Resources)], ctypes.c_int),
         "qrmi_service_resources_free": ([ctypes.POINTER(_Resources)], ctypes.c_int),
+        "qrmi_resource_task_start": (
+            [
+                ctypes.c_void_p,
+                ctypes.POINTER(_Payload),
+                ctypes.POINTER(ctypes.c_void_p),
+            ],
+            ctypes.c_int,
+        ),
     }
     for name, (arguments, result) in signatures.items():
         function = getattr(api, name)
@@ -411,3 +443,90 @@ def test_native_error_codes_reach_python_categories(
     resource = QuantumResource("py_maestro", ResourceType.MaestroLocal)
     with pytest.raises(exception, match="review probe"):
         resource.task_logs("8")
+
+
+NATIVE_REQUEST = '{"schema_version":2,"operation":"execute"}'
+SUBMIT = (
+    'API {"version":2,"command":"submit","session_id":3,"request":'
+    + NATIVE_REQUEST
+    + "}"
+)
+CAPABILITIES = (
+    'API {"version":2,"command":"capabilities"}',
+    'OK {"version":2,"ok":true,"native":{"schema_version":2}}',
+)
+UNRECOGNIZED_SUBMISSION_REPLIES = [
+    'OK {"ok":true,"task_id":73}',
+    "garbled response",
+    "ERROR Unknown command",
+    'OK {"version":3,"ok":true,"task_id":73}',
+    'OK {"version":2,"ok":true}',
+]
+
+
+def native_payload():
+    """A native request payload; legacy positional fields are unused."""
+    return Payload.MaestroLocal(
+        input=NATIVE_REQUEST,
+        job_type="request",
+        qubits=0,
+        simulator_type=0,
+        simulation_method=0,
+        observables="",
+        config="{}",
+    )
+
+
+@pytest.mark.parametrize("reply", UNRECOGNIZED_SUBMISSION_REPLIES)
+def test_unrecognized_submit_reply_is_generic(server, monkeypatch, reply):
+    """Only the generic error may follow a sent request without a valid refusal."""
+    monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "3")
+    server.extend([CAPABILITIES, (SUBMIT, reply)])
+    resource = QuantumResource("py_maestro", ResourceType.MaestroLocal)
+    with pytest.raises(QrmiError, match="may have been created") as raised:
+        resource.task_start(native_payload())
+    assert raised.type is QrmiError
+
+
+def test_submit_refusal_keeps_its_category(server, monkeypatch):
+    """A well-formed v2 refusal still proves that no task was created."""
+    monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "3")
+    refusal = {
+        "version": 2,
+        "ok": False,
+        "error": {"code": "invalid_input", "message": "review probe"},
+    }
+    server.extend([CAPABILITIES, (SUBMIT, "OK " + json.dumps(refusal))])
+    resource = QuantumResource("py_maestro", ResourceType.MaestroLocal)
+    with pytest.raises(InvalidInputError, match="review probe"):
+        resource.task_start(native_payload())
+
+
+def test_c_submit_codes_follow_task_start_contract(c_api, server, monkeypatch):
+    """C callers see QRMI_RETURN_CODE_ERROR (100) when a task may exist."""
+    monkeypatch.setenv("py_maestro_QRMI_JOB_ACQUISITION_TOKEN", "3")
+    refusal = (
+        'OK {"version":2,"ok":false,"error":'
+        '{"code":"invalid_input","message":"review probe"}}'
+    )
+    cases = [(reply, 100) for reply in UNRECOGNIZED_SUBMISSION_REPLIES]
+    cases.append((refusal, 109))
+    resource = c_api.qrmi_resource_new(b"py_maestro", int(ResourceType.MaestroLocal))
+    assert resource
+    try:
+        for index, (reply, expected) in enumerate(cases):
+            # Every protocol failure resets negotiation; a refusal keeps it.
+            if index == 0 or cases[index - 1][1] == 100:
+                server.append(CAPABILITIES)
+            server.append((SUBMIT, reply))
+            payload = _Payload(
+                QRMI_PAYLOAD_MAESTRO_LOCAL,
+                _MaestroBody(NATIVE_REQUEST.encode(), b"request", 0, 0, 0, b"", b"{}"),
+            )
+            task = ctypes.c_void_p()
+            code = c_api.qrmi_resource_task_start(
+                resource, ctypes.byref(payload), ctypes.byref(task)
+            )
+            assert code == expected, reply
+    finally:
+        c_api.qrmi_resource_free(resource)

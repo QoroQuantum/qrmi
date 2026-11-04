@@ -2,6 +2,8 @@
 
 Set QRMI_TEST_MAESTRO_SERVER to the rebuilt daemon, and its native library search
 path in LD_LIBRARY_PATH. The test harness starts no Python server or worker.
+QRMI_TEST_MAESTRO_REQUEST names the native maestro-request executable. With
+QRMI_REQUIRE_MAESTRO_NATIVE=1, as in CI, a missing binary fails instead of skipping.
 """
 
 import json
@@ -28,16 +30,25 @@ from qrmi.maestro import payload_from_input, request_payload
 EXAMPLES = Path(__file__).resolve().parents[4] / "examples/task_runner/maestro_local"
 
 
+def required_binary(variable, reason):
+    """A configured native binary; required runs fail rather than skip without it."""
+    path = os.environ.get(variable)
+    if not path:
+        if os.environ.get("QRMI_REQUIRE_MAESTRO_NATIVE") == "1":
+            pytest.fail(f"QRMI_REQUIRE_MAESTRO_NATIVE=1 but {variable} is unset")
+        pytest.skip(reason)
+    return path
+
+
 @pytest.mark.parametrize(
     "path", sorted(EXAMPLES.glob("native-*.json")), ids=lambda p: p.stem
 )
 def test_example_native_validation(path):
     """Validate every example's computational document with the native CLI."""
-    worker = os.environ.get("QRMI_TEST_MAESTRO_REQUEST")
-    if not worker:
-        pytest.skip(
-            "set QRMI_TEST_MAESTRO_REQUEST to the native maestro-request executable"
-        )
+    worker = required_binary(
+        "QRMI_TEST_MAESTRO_REQUEST",
+        "set QRMI_TEST_MAESTRO_REQUEST to the native maestro-request executable",
+    )
     document = json.loads(path.read_text())
     # Server profile selection is tested separately; the C ABI accepts only the
     # computational document, including for hardware-dependent examples.
@@ -190,9 +201,10 @@ def test_fixed_noisy_shots_remain_independent(native_resource, backend, method):
 @pytest.fixture(name="native_resource")
 def fixture_native_resource(tmp_path, monkeypatch, request):
     """Start a private native daemon and clean up its acquired session."""
-    binary = os.environ.get("QRMI_TEST_MAESTRO_SERVER")
-    if not binary:
-        pytest.skip("set QRMI_TEST_MAESTRO_SERVER to enable native end-to-end tests")
+    binary = required_binary(
+        "QRMI_TEST_MAESTRO_SERVER",
+        "set QRMI_TEST_MAESTRO_SERVER to enable native end-to-end tests",
+    )
     socket = str(tmp_path / "maestro.sock")
     monkeypatch.setenv("QRMI_MAESTRO_SOCKET", socket)
     monkeypatch.delenv("native_test_QRMI_JOB_ACQUISITION_TOKEN", raising=False)
@@ -961,3 +973,199 @@ def test_status_and_current_capabilities_through_qrmi(native_resource):
     document["simulator"]["options"] = {"mps_measure_no_collapse": True}
     with pytest.raises(InvalidInputError, match="Unknown simulator option"):
         native_resource.task_start(request_payload(document))
+
+
+def run_native(resource, document):
+    """Submit through QRMI and return the decoded native result."""
+    task = resource.task_start(request_payload(document))
+    assert await_task(resource, task) == TaskStatus.Completed
+    return task, json.loads(resource.task_result(task).value)
+
+
+def option_entry(caps, name):
+    """One native option's discovery metadata."""
+    return next(entry for entry in caps["native"]["options"] if entry["name"] == name)
+
+
+def test_current_option_contract_through_qrmi(native_resource):
+    """Discovery metadata and backend-specific bounds reach QRMI unchanged."""
+    caps = json.loads(native_resource.target().value)
+    workers = option_entry(caps, "pp_workers")
+    assert workers["maximum"] == 1024
+    assert workers["constraints"] == [{"backend": "gpu", "minimum": 1, "maximum": 64}]
+    assert option_entry(caps, "pp_max_fused_gates")["maximum"] == 256
+    strategy = option_entry(caps, "mps_routing_strategy")
+    assert strategy["enum"] == ["combined", "legacy"]
+    assert strategy["default"] == "legacy"
+    assert {"backend": "gpu", "method": "matrix_product_state"} not in strategy[
+        "supported_configurations"
+    ]
+    assert option_entry(caps, "trajectory_policy")["default"] == "shot_v1"
+
+    # Accepted combinations validate without a GPU, plugin or licence.
+    for backend, method, options in [
+        ("gpu", "pauli_propagator", {"pp_workers": 64, "pp_max_fused_gates": 1}),
+        ("gpu", "pauli_propagator", {"pp_memory_limit_bytes": 1 << 30}),
+        ("qcsim", "pauli_propagator", {"pp_workers": 0}),
+        ("qcsim", "matrix_product_state", {"mps_routing_strategy": "combined"}),
+        ("gpu", "matrix_product_operator", {"mps_routing_virtual_bonds": True}),
+        ("qcsim", "density_matrix", {"trajectory_policy": "block_v1"}),
+        (
+            "qcsim",
+            "statevector",
+            {"min_cluster_qubits": 2, "max_cluster_qubits": 4, "auto_reduce": False},
+        ),
+    ]:
+        document = native_request("validate", method)
+        document["simulator"]["backend"] = backend
+        document["simulator"]["options"] = options
+        _, result = run_native(native_resource, document)
+        assert result["valid"] is True, options
+
+    # Rejections keep their QRMI categories and never create a task.
+    for backend, method, options, error in [
+        ("gpu", "pauli_propagator", {"pp_workers": 0}, InvalidInputError),
+        ("gpu", "pauli_propagator", {"pp_workers": 65}, InvalidInputError),
+        ("qcsim", "pauli_propagator", {"pp_workers": 1025}, InvalidInputError),
+        ("gpu", "pauli_propagator", {"pp_max_fused_gates": 257}, InvalidInputError),
+        (
+            "qcsim",
+            "pauli_propagator",
+            {"pp_memory_limit_bytes": 1024},
+            UnsupportedFunctionError,
+        ),
+        (
+            "gpu",
+            "matrix_product_state",
+            {"mps_routing_strategy": "combined"},
+            UnsupportedFunctionError,
+        ),
+        (
+            "qcsim",
+            "statevector",
+            {"min_cluster_qubits": 5, "max_cluster_qubits": 4},
+            InvalidInputError,
+        ),
+        (
+            "qcsim",
+            "matrix_product_state",
+            {"trajectory_policy": "shot_v1"},
+            UnsupportedFunctionError,
+        ),
+    ]:
+        document = native_request("execute", method)
+        document["simulator"]["backend"] = backend
+        document["simulator"]["options"] = options
+        with pytest.raises(error):
+            native_resource.task_start(request_payload(document))
+
+
+def test_new_native_examples_through_qrmi(native_resource):
+    """Newer native operations and instruction fields pass through unchanged."""
+    caps = json.loads(native_resource.target().value)
+    assert {"adjoint_jacobian", "adjoint_vjp"} <= set(caps["native"]["operations"])
+    assert caps["native"]["instructions"]["fields"]["noiseless"] == ["gates"]
+
+    document = json.loads((EXAMPLES / "native-adjoint.json").read_text())
+    task, result = run_native(native_resource, document)
+    assert result["num_parameters"] == 2
+    assert result["num_values"] == 4
+    # The second row has every angle zero: |00>, P(q1=1) = 0.
+    assert result["expectation_values"][1] == pytest.approx([1, 0.5, 1, 0])
+    # d<ZI>/d(ry angle) = -sin(0.4); the rx angle cannot change <ZI>.
+    assert result["jacobian"][0][0] == pytest.approx([-math.sin(0.4), 0], abs=1e-12)
+    logs = json.loads(native_resource.task_logs(task))
+    assert logs["seeds"] == []
+    assert logs["native_build"] == caps["native"]["build"]
+
+    document["operation"] = "adjoint_vjp"
+    document["cotangents"] = [[1, 0, 0, 0], [0, 0, 0, 0]]
+    _, vjp = run_native(native_resource, document)
+    assert vjp["vjp"][0] == pytest.approx(result["jacobian"][0][0])
+    document["cotangents"] = [[1, 0, 0, 0]]
+    with pytest.raises(InvalidInputError, match="cotangents"):
+        native_resource.task_start(request_payload(document))
+
+    document = json.loads((EXAMPLES / "native-mirror-observables.json").read_text())
+    _, result = run_native(native_resource, document)
+    assert result["expectation_values"] == pytest.approx([1, 1, 1, 1])
+    # A bond cap of one truncates the GHZ entanglement the mirror must undo.
+    document["simulator"]["options"]["max_bond_dimension"] = 1
+    _, result = run_native(native_resource, document)
+    assert min(result["expectation_values"]) < 0.5
+
+    document = json.loads((EXAMPLES / "native-instructions.json").read_text())
+    _, result = run_native(native_resource, document)
+    assert result["counts"] == {"01": 32}
+    # Pure states sample the channel and need a trajectory noise block.
+    document["simulator"]["method"] = "statevector"
+    with pytest.raises(UnsupportedFunctionError, match="trajectory"):
+        native_resource.task_start(request_payload(document))
+    document["noise"] = {"realizations": 32}
+    _, result = run_native(native_resource, document)
+    assert result["counts"] == {"01": 32}
+
+
+def test_readout_refusal_and_mixed_state_mirror_through_qrmi(native_resource):
+    """Removed measurements refuse readout; mixed-state mirror observables run."""
+    annotated = {
+        "format": "instructions",
+        "num_qubits": 1,
+        "source": [
+            {"name": "ry", "qubits": [0], "params": [0.4]},
+            {"name": "measure", "qubits": [0], "readout_error": 1},
+        ],
+    }
+    plain = {"num_qubits": 1, "source": "OPENQASM 2.0; qreg q[1]; ry(0.4) q[0];"}
+    base = {
+        "schema_version": 2,
+        "simulator": {"backend": "qcsim", "method": "statevector"},
+        "execution": {"seed": 123},
+    }
+    refused = [
+        {
+            **base,
+            "operation": operation,
+            "circuit": annotated,
+            "observables": ["Z"],
+            **({"cotangents": [[1]]} if operation == "adjoint_vjp" else {}),
+        }
+        for operation in (
+            "adjoint_expectation_values",
+            "adjoint_jacobian",
+            "adjoint_vjp",
+        )
+    ]
+    refused.append(
+        {
+            **base,
+            "operation": "inner_product",
+            "circuit": plain,
+            "other_circuit": annotated,
+        }
+    )
+    refused.append(
+        {
+            **base,
+            "operation": "incremental_evolve",
+            "circuit": plain,
+            "step_circuit": annotated,
+            "steps": [1],
+            "observables": ["Z"],
+        }
+    )
+    for document in refused:
+        with pytest.raises(UnsupportedFunctionError, match="readout_error"):
+            native_resource.task_start(request_payload(document))
+
+    # Mirror expectations need no pure-state overlap; plain mirror fidelity does.
+    document = json.loads((EXAMPLES / "native-mirror-observables.json").read_text())
+    for method in ("density_matrix", "matrix_product_operator"):
+        document["simulator"] = {"backend": "qcsim", "method": method}
+        _, result = run_native(native_resource, document)
+        assert result["expectation_values"] == pytest.approx([1, 1, 1, 1])
+        fidelity = {
+            key: value for key, value in document.items() if key != "observables"
+        }
+        with pytest.raises(UnsupportedFunctionError, match="mixed state"):
+            native_resource.task_start(request_payload(fidelity))

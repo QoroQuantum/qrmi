@@ -1,0 +1,42 @@
+features:
+  - |
+    Maestro Local documents and tests the newer native options (CPU MPS/MPO
+    routing, estimation reductions and observable clustering, trajectory
+    policies, and GPU Pauli memory budget, fusion limit, workers and sampling
+    cache) and the newer native operations: adjoint values, Jacobians and
+    vector-Jacobian products, observable mirror fidelity, and instruction-array
+    ``rxx``/``rzz``, ``noiseless``, ``readout_error`` and ``pauli_channel``.
+    They use the existing ``request`` payload; no new payload type or C ABI
+    change is needed. New examples cover them.
+upgrade:
+  - |
+    The newer native operations and instruction fields need a matching Maestro
+    library and local server. Older libraries reject them before allocating a
+    task. Task logs from newer servers also report ``native_build``, the
+    Maestro library build that ran the task. Observable ``mirror_fidelity`` on
+    ``density_matrix``/``matrix_product_operator`` and the refusal of
+    ``readout_error`` by operations that remove terminal measurements also need
+    a matching Maestro library.
+fixes:
+  - |
+    The Maestro Local client accepts a reply carrying a result at the server's
+    full result bound. It previously counted the ``OK`` prefix and newline
+    against the 64 MiB native result limit, so a result Maestro and the server
+    allowed could fail as an oversized response.
+  - |
+    A malformed or unrecognized reply to a Maestro native submission (missing
+    ``OK`` prefix or API version, another API version, or a missing task ID)
+    is now the generic error (``QrmiErrorKind::Other``, Python ``QrmiError``,
+    C ``QRMI_RETURN_CODE_ERROR``) rather than ``UnsupportedFunction``. Such a
+    reply does not prove that the submission was refused, so a task may exist;
+    reporting it as unsupported broke ``task_start``'s guarantee that other
+    error kinds created no task. Legacy-server detection during capability
+    negotiation is unchanged.
+  - |
+    The Maestro 0.26 migration guide no longer describes ``status()`` as
+    PING-only.
+other:
+  - |
+    A CPU workflow now runs the native Maestro integration suite against pinned
+    Maestro and local-server commits, with ``QRMI_REQUIRE_MAESTRO_NATIVE=1`` so
+    that a missing native binary fails rather than skips.

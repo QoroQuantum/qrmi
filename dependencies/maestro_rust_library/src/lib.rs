@@ -44,6 +44,12 @@ pub mod maestro_lib {
         }
     }
 
+    /// Largest task result a Maestro server sends (its `server.max_result_bytes`):
+    /// Maestro's 64 MiB bound on a whole native result plus metadata headroom.
+    pub const MAX_RESULT_BYTES: u64 = 64 * 1024 * 1024 + 64 * 1024;
+    /// A reply line wraps a result in `OK ` and a newline; the rest is spare.
+    pub const MAX_RESPONSE_BYTES: u64 = MAX_RESULT_BYTES + 4096;
+
     pub(crate) fn exchange(socket_path: &Path, command: &str) -> std::io::Result<String> {
         let mut stream = UnixStream::connect(socket_path)?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
@@ -51,7 +57,6 @@ pub mod maestro_lib {
         stream.write_all(command.as_bytes())?;
         stream.shutdown(std::net::Shutdown::Write)?;
         let mut response = String::new();
-        const MAX_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
         if BufReader::new(stream)
             .take(MAX_RESPONSE_BYTES + 1)
             .read_line(&mut response)?
@@ -92,6 +97,52 @@ pub mod maestro_lib {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use std::os::unix::net::UnixListener;
+
+        // Replies once with `reply` and returns what the client received.
+        fn exchange_reply(name: &str, reply: Vec<u8>) -> std::io::Result<String> {
+            let path = std::env::temp_dir().join(format!(
+                "maestro-response-{}-{name}.sock",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let listener = UnixListener::bind(&path)?;
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut command = String::new();
+                BufReader::new(socket.try_clone().unwrap())
+                    .read_line(&mut command)
+                    .unwrap();
+                // The client stops reading at its limit; a closed socket is fine.
+                let _ = socket.write_all(&reply);
+            });
+            let response = exchange(&path, "SESSION 1 TASK 1 GET_RESULTS\n");
+            server.join().unwrap();
+            std::fs::remove_file(path)?;
+            response
+        }
+
+        #[test]
+        fn accepts_a_result_at_the_server_result_bound() {
+            // A quote-heavy result at the bound, framed exactly as the server does.
+            let size = MAX_RESULT_BYTES as usize;
+            let mut reply = Vec::with_capacity(size + 4);
+            reply.extend_from_slice(b"OK {\"k\":\"");
+            while reply.len() < size + 3 - 2 {
+                reply.extend_from_slice(b"\\\"");
+            }
+            reply.extend_from_slice(b"\"}\n");
+            assert_eq!(reply.len(), size + 4);
+            let response = exchange_reply("bound", reply).unwrap();
+            assert_eq!(response.len(), size + 4);
+            assert!(
+                matches!(parse_response(&response), Response::OkResponse(value) if value.len() == size)
+            );
+
+            let oversized = vec![b'x'; MAX_RESPONSE_BYTES as usize + 1];
+            let error = exchange_reply("oversized", oversized).unwrap_err();
+            assert!(error.to_string().contains("Oversized"), "{error}");
+        }
 
         #[test]
         fn parses_acknowledgements_values_and_errors() {

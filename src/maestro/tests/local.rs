@@ -352,6 +352,53 @@ fn old_server_cannot_silently_accept_native_features() {
 }
 
 #[test]
+fn unrecognized_submission_replies_keep_task_creation_uncertain() {
+    // task_start promises "no task" for every kind except Other. After the
+    // request was sent, only a well-formed API v2 refusal can keep that promise.
+    let _lock = ENV_LOCK.lock().unwrap();
+    let request = r#"{"schema_version":2,"operation":"execute"}"#;
+    let submit = format!(
+        "API {{\"version\":2,\"command\":\"submit\",\"session_id\":3,\"request\":{request}}}"
+    );
+    for (reply, kind) in [
+        (r#"OK {"ok":true,"task_id":73}"#, QrmiErrorKind::Other),
+        ("garbled response", QrmiErrorKind::Other),
+        ("ERROR Unknown command", QrmiErrorKind::Other),
+        (
+            r#"OK {"version":3,"ok":true,"task_id":73}"#,
+            QrmiErrorKind::Other,
+        ),
+        (r#"OK {"version":2,"ok":true}"#, QrmiErrorKind::Other),
+        (
+            r#"OK {"version":2,"ok":false,"error":{"code":"invalid_input","message":"review probe"}}"#,
+            QrmiErrorKind::InvalidInput,
+        ),
+        (
+            r#"OK {"version":2,"ok":false,"error":{"code":"unsupported_capability","message":"review probe"}}"#,
+            QrmiErrorKind::UnsupportedFunction,
+        ),
+    ] {
+        let server = Server::new(&[
+            (
+                "API {\"version\":2,\"command\":\"capabilities\"}",
+                "OK {\"version\":2,\"ok\":true,\"native\":{\"schema_version\":2}}",
+            ),
+            (&submit, reply),
+        ]);
+        let mut qrmi = resource(Some(3));
+        let error = block_on(qrmi.task_start(request_payload(request.into()))).unwrap_err();
+        assert_eq!(error.kind(), kind, "{reply}");
+        if kind == QrmiErrorKind::Other {
+            assert!(
+                error.to_string().contains("may have been created"),
+                "{error}"
+            );
+        }
+        server.assert_done();
+    }
+}
+
+#[test]
 fn malformed_native_request_does_not_create_a_task() {
     let _lock = ENV_LOCK.lock().unwrap();
     let server = Server::new(&[]);

@@ -69,6 +69,14 @@ impl Client {
     }
 
     fn call(&self, document: json::JsonValue) -> Result<json::JsonValue, Error> {
+        self.call_with(document, parse_response)
+    }
+
+    fn call_with(
+        &self,
+        document: json::JsonValue,
+        parse: fn(&str) -> Result<json::JsonValue, Error>,
+    ) -> Result<json::JsonValue, Error> {
         let command = format!("API {}\n", document.dump());
         if command.len() > MAX_REQUEST_BYTES {
             return Err(Error::new(
@@ -78,7 +86,7 @@ impl Client {
         }
         let result = maestro_lib::exchange(&self.socket, &command)
             .map_err(|error| Error::new("transport", error.to_string()))
-            .and_then(|response| parse_response(&response));
+            .and_then(|response| parse(&response));
         if result.as_ref().is_err_and(|error| {
             matches!(
                 error.code.as_str(),
@@ -116,12 +124,20 @@ impl Client {
         if !self.negotiated.load(Ordering::SeqCst) {
             self.capabilities()?;
         }
-        let response = self.call(json::object! {
-            version: VERSION, command: "submit", session_id: session_id, request: request,
-        })?;
+        // Legacy-server detection belongs to negotiation above. Once the request
+        // has been sent, only a well-formed v2 refusal proves that no task exists.
+        let response = self.call_with(
+            json::object! {
+                version: VERSION, command: "submit", session_id: session_id, request: request,
+            },
+            parse_submission_response,
+        )?;
         response["task_id"].as_u32().ok_or_else(|| {
             self.negotiated.store(false, Ordering::SeqCst);
-            Error::new("protocol", "Missing task_id")
+            Error::new(
+                "protocol",
+                "Missing task_id; the task may have been created",
+            )
         })
     }
 
@@ -188,6 +204,23 @@ impl Client {
         self.call(json::object! { version: VERSION, command: "keepalive", session_id: session_id })
             .map(|_| ())
     }
+}
+
+/// Replies to a submission. A reply that is not a well-formed API v2 envelope
+/// does not show that the server refused the request, so it is a protocol
+/// failure rather than an unsupported API: the task may already exist.
+fn parse_submission_response(response: &str) -> Result<json::JsonValue, Error> {
+    let envelope = response
+        .strip_prefix("OK ")
+        .and_then(|document| json::parse(document.trim()).ok());
+    if envelope.is_none_or(|value| value["version"].as_u32() != Some(VERSION)) {
+        let reply: String = response.trim().chars().take(256).collect();
+        return Err(Error::new(
+            "protocol",
+            format!("Unrecognized reply to a submission; the task may have been created: {reply}"),
+        ));
+    }
+    parse_response(response)
 }
 
 fn parse_response(response: &str) -> Result<json::JsonValue, Error> {
@@ -298,6 +331,66 @@ mod tests {
                 .unwrap_err()
                 .code
                 == "invalid_input"
+        );
+    }
+
+    #[test]
+    fn malformed_submission_replies_never_claim_that_no_task_exists() {
+        // Only a well-formed v2 refusal proves that submission created no task.
+        for (reply, code) in [
+            (r#"OK {"ok":true,"task_id":73}"#, "protocol"),
+            ("garbled response", "protocol"),
+            ("ERROR Unknown command", "protocol"),
+            (r#"OK {"version":3,"ok":true,"task_id":73}"#, "protocol"),
+            (r#"OK {"version":2,"ok":true}"#, "protocol"),
+            (r#"OK {"version":2}"#, "protocol"),
+            ("OK broken", "protocol"),
+            (
+                r#"OK {"version":2,"ok":false,"error":{"code":"invalid_input","message":"bad arity"}}"#,
+                "invalid_input",
+            ),
+            (
+                r#"OK {"version":2,"ok":false,"error":{"code":"unsupported_capability","message":"no GPU"}}"#,
+                "unsupported_capability",
+            ),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "maestro-submit-{}-{}.sock",
+                std::process::id(),
+                SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
+            let listener = UnixListener::bind(&path).unwrap();
+            let server = std::thread::spawn(move || {
+                for (command, answer) in [
+                    (
+                        "capabilities",
+                        r#"OK {"version":2,"ok":true,"native":{"schema_version":2}}"#,
+                    ),
+                    ("submit", reply),
+                ] {
+                    let (mut socket, _) = listener.accept().unwrap();
+                    let mut line = String::new();
+                    BufReader::new(socket.try_clone().unwrap())
+                        .read_line(&mut line)
+                        .unwrap();
+                    let value = json::parse(line.strip_prefix("API ").unwrap()).unwrap();
+                    assert_eq!(value["command"].as_str(), Some(command));
+                    writeln!(socket, "{answer}").unwrap();
+                }
+            });
+            let client = Client::new(&path);
+            let error = client
+                .submit(1, r#"{"schema_version":2,"operation":"execute"}"#)
+                .unwrap_err();
+            server.join().unwrap();
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(error.code, code, "{reply}");
+            assert!(!client.negotiated.load(Ordering::SeqCst) || code != "protocol");
+        }
+        // Negotiation still identifies a legacy server explicitly.
+        assert_eq!(
+            parse_response("ERROR Unknown command\n").unwrap_err().code,
+            "unsupported_api"
         );
     }
 

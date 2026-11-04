@@ -48,10 +48,13 @@ is omitted. The existing environment-based constructor remains available.
 Resource status
 ---------------
 
-``status()`` uses the existing server PING through QRMI's default status
-implementation: a positive reply means online, a negative reply means offline,
-and communication errors remain errors. Health, capacity, queue and busy fields
-are unspecified. The deprecated ``is_accessible()`` retains its behavior.
+``status()`` uses the server's additive API v2 ``status`` command without
+creating or renewing a session. It reports Online when the runner accepts jobs
+and Offline otherwise, with ``status_reason``, ``healthy``, ``busy`` and
+``pending_job_count`` from the server. Capacity is unspecified. Only an older
+server that rejects the command as unsupported falls back to PING, with health,
+occupancy and queue length unknown; transport errors and malformed replies
+remain errors. The deprecated ``is_accessible()`` retains its PING behavior.
 
 Validation
 ----------

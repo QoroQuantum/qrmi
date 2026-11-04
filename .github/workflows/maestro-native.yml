@@ -1,0 +1,147 @@
+---
+# QRMI -> maestro-local-server -> Maestro end-to-end tests on CPU.
+#
+# Both native projects are pinned, so upstream changes cannot silently alter
+# this run. Update the pins together with QRMI changes that rely on newer native
+# features. GPU, MPI and licensed-plugin checks remain opt-in on suitable
+# hardware; QRMI_REQUIRE_MAESTRO_NATIVE makes the CPU checks fail instead of skip.
+
+name: Maestro native integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  BOOST_VERSION: 1.90.0
+  MAESTRO_REF: 3cbe325582a0394481293b034929d6f2a5249356
+  MAESTRO_LOCAL_SERVER_REF: 093c177e869e6c71c0c4e606ae4385e7d86894cd
+
+jobs:
+  native:
+    name: Native QRMI suite
+    # maestro-local-server is private. Its read token (a fine-grained token with
+    # contents:read on that repository, stored as MAESTRO_LOCAL_SERVER_TOKEN) is
+    # unavailable to forks and to the upstream QRMI repository.
+    if: >-
+      github.repository == 'QoroQuantum/qrmi' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the local-server read token
+        env:
+          TOKEN: ${{ secrets.MAESTRO_LOCAL_SERVER_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set the MAESTRO_LOCAL_SERVER_TOKEN secret (contents:read on QoroQuantum/maestro-local-server)"
+            exit 1
+          fi
+
+      - name: Check out maestro-local-server
+        uses: actions/checkout@v4
+        with:
+          repository: QoroQuantum/maestro-local-server
+          ref: ${{ env.MAESTRO_LOCAL_SERVER_REF }}
+          token: ${{ secrets.MAESTRO_LOCAL_SERVER_TOKEN }}
+          persist-credentials: false
+          path: native-server
+
+      # QRMI's Cargo workspace would claim a nested package, so build the native
+      # projects outside the QRMI checkout.
+      - name: Place native sources outside the QRMI workspace
+        run: |
+          mv native-server "$RUNNER_TEMP/maestro-local-server"
+          test "$(git -C "$RUNNER_TEMP/maestro-local-server" rev-parse HEAD)" = "$MAESTRO_LOCAL_SERVER_REF"
+          git init -q "$RUNNER_TEMP/maestro"
+          git -C "$RUNNER_TEMP/maestro" remote add origin https://github.com/QoroQuantum/maestro.git
+          git -C "$RUNNER_TEMP/maestro" fetch --depth 1 origin "$MAESTRO_REF"
+          git -C "$RUNNER_TEMP/maestro" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/maestro" rev-parse HEAD)" = "$MAESTRO_REF"
+          echo "MAESTRO_DIR=$RUNNER_TEMP/maestro" >> "$GITHUB_ENV"
+          echo "SERVER_DIR=$RUNNER_TEMP/maestro-local-server" >> "$GITHUB_ENV"
+
+      - name: Install system build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build ccache libclang-dev libopenblas-dev
+
+      - name: Cache Boost
+        id: cache-boost
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/include/boost
+            /usr/local/lib/libboost*
+          key: ${{ runner.os }}-boost-${{ env.BOOST_VERSION }}
+
+      - name: Build Boost
+        if: steps.cache-boost.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          BOOST_DIR="boost_$(echo "$BOOST_VERSION" | tr . _)"
+          curl -L "https://archives.boost.io/release/$BOOST_VERSION/source/$BOOST_DIR.tar.gz" --output boost.tgz
+          tar -xzf boost.tgz
+          cd "$BOOST_DIR"
+          ./bootstrap.sh --prefix=/usr/local
+          sudo ./b2 -j"$(nproc)" --with-program_options --with-json --with-container --with-serialization install
+
+      - name: Register Boost libraries
+        run: sudo ldconfig
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-maestro-native-${{ runner.os }}-${{ env.MAESTRO_REF }}
+          restore-keys: |
+            ccache-maestro-native-${{ runner.os }}-
+
+      - name: Build Maestro
+        env:
+          BOOST_ROOT: /usr/local
+        run: |
+          cmake -S "$MAESTRO_DIR" -B "$MAESTRO_DIR/build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON_BINDINGS=OFF \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          # Qiskit Aer translation units need several GB each; cap parallelism.
+          cmake --build "$MAESTRO_DIR/build" --target maestro maestro_request_worker -j2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build maestro-local-server
+        run: cargo build --locked --manifest-path "$SERVER_DIR/Cargo.toml"
+
+      - name: Test the Maestro client crate
+        run: cargo test --locked -p maestro-local-api
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-dev.txt
+
+      - name: Install QRMI
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[all]"
+          pip install pytest
+
+      - name: Run native integration tests
+        env:
+          QRMI_REQUIRE_MAESTRO_NATIVE: "1"
+        run: |
+          export LD_LIBRARY_PATH="$MAESTRO_DIR/build"
+          export QRMI_TEST_MAESTRO_SERVER="$SERVER_DIR/target/debug/maestro-local-server"
+          export QRMI_TEST_MAESTRO_REQUEST="$MAESTRO_DIR/build/bin/maestro-request"
+          pytest -rs python/tests/unit/quantum_resource/test_maestro_native_integration.py

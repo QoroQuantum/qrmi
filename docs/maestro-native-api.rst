@@ -76,7 +76,10 @@ contains successive result indices for nested batches. Replay the corresponding
 original request with those values as ``execution.seed`` and ``noise.seed``.
 Seed history is limited to 256 entries and four batch levels;
 ``seeds_truncated`` indicates omitted results. It lasts until session cleanup or
-server restart. Updated servers also retain
+server restart. Seeded samples replay only on the same native library build;
+newer servers record that build as ``native_build`` (``{version,
+source_revision}``) in the same logs, or ``null`` for MPI tasks and tasks that
+never returned a result. Updated servers also retain
 logs after successful cancellation, including final output drained during worker
 shutdown. Observe failed status before
 requesting a result; QRMI raises ``TaskNotReady`` for failed tasks. If execution and
@@ -91,6 +94,18 @@ session calls for acquiring a new session, not choosing a new backend. Malformed
 launch/rank input maps to ``InvalidInputError``; a broken profile file or
 missing/nonexecutable launcher, worker or Slurm cancellation tool maps to
 ``ConfigError``. Selecting an unknown profile maps to ``UnsupportedFunctionError``.
+
+These categories follow ``QuantumResource::task_start``'s contract: every error
+except the generic one (Rust ``QrmiErrorKind::Other``, Python ``QrmiError``, C
+``QRMI_RETURN_CODE_ERROR``) means that no task was created. Only a well-formed
+API v2 refusal from the server establishes that. After the request has been
+sent, a lost connection, a missing ``task_id``, a reply without the ``OK``
+prefix or with another API version, or any other unrecognized reply is the
+generic error, whose message says that the task may have been created. Do not
+resubmit blindly in the same session after such an error: releasing the
+acquisition token deletes the session and cancels any task it still runs.
+Unsupported-API errors come only from capability negotiation, before any
+submission is sent.
 
 Updated servers add ``session_id``, ``task_id``, ``context`` and ``events`` to the
 same diagnostic JSON. Each event has ``timestamp_unix_ms`` and ``state``; submitted
@@ -279,7 +294,9 @@ Counts use classical bit 0 first. Pauli strings and target-state strings use qub
 first. Integer amplitude/probability indices use qubit 0 as the least significant bit.
 Complex entries are ``[real, imaginary]``.
 
-Requests are bounded to 16 MiB and serialized results to 64 MiB. Use selected
+Requests are bounded to 16 MiB and serialized results to 64 MiB; that native bound
+covers the whole result document, and the server's ``max_result_bytes`` adds headroom
+for MPI metadata. QRMI accepts a reply of that size plus its ``OK`` framing. Use selected
 ``basis_states`` and ``max_output_elements`` for state queries. Batches have at most 256
 members and four nested levels. No interactive state persists across tasks. Composer
 orchestration, decoder/Sinter execution, general pure-state Kraus trajectories, new
@@ -317,7 +334,12 @@ include ideal and noisy local GPU distribution through QRMI. No system service i
 restarted. Set ``QRMI_TEST_MPI_GPU_PROFILE`` to a profile with working rank-local GPU
 binding, the MPI GPU plugin/license and CUDA-aware MPI to run ideal and noisy
 ``distributed_mpi_gpu`` cases. Those tests assert the actual backend and rank count; the
-CPU MPI test alone does not verify GPU distribution. The live legacy suite in
+CPU MPI test alone does not verify GPU distribution. Set
+``QRMI_REQUIRE_MAESTRO_NATIVE=1`` to make a missing daemon or ``maestro-request``
+fail these tests instead of skipping them. The ``Maestro native integration``
+workflow does this on CPU against the Maestro and local-server commits pinned in
+``.github/workflows/maestro-native.yml``; it needs the ``MAESTRO_LOCAL_SERVER_TOKEN``
+secret to read the private server repository. The live legacy suite in
 ``python/tests/integration/quantum_resource/test_maestro_live.py`` requires
 ``QRMI_TEST_MAESTRO_LIVE=1`` and skips backend cases absent from the capability catalog.
 
@@ -358,8 +380,62 @@ For boolean sampling migration, true becomes ``probabilities`` and false becomes
 ``mps_apply_measure`` lose their prefix. Select the SVD solver whose former flag
 was true; omit the selector if all flags were false. Do not send both old and new
 keys. QCSim computes in double precision; precision/SVD selections apply only to
-backends advertised by the catalog. CPU Pauli propagation also accepts
-``pp_workers`` (0 through 1024) and nonnegative ``pp_sampling_cache_nodes``.
+backends advertised by the catalog.
+
+Newer Maestro libraries add the following options. Their ranges come from the
+catalog entries; per-backend limits appear as ``constraints``:
+
+.. list-table:: Newer native options
+   :header-rows: 1
+   :widths: 35 25 40
+
+   * - Option(s)
+     - Applies to
+     - Values and constraints
+   * - ``pp_workers``
+     - QCSim and GPU Pauli propagation
+     - QCSim 0–1024; GPU 1–64 (default 1). ``pp_workers: 0`` is rejected on GPU.
+   * - ``pp_sampling_cache_nodes``
+     - QCSim and GPU Pauli propagation
+     - Nonnegative; GPU default 8192, zero disables caching
+   * - ``pp_memory_limit_bytes``
+     - GPU Pauli propagation
+     - Positive budget, default 90% of free GPU memory; a limit, not a reservation
+   * - ``pp_max_fused_gates``
+     - GPU Pauli propagation
+     - 1–256, default 64; one disables fusion
+   * - ``mps_routing_strategy``
+     - QCSim MPS/MPO
+     - ``legacy`` (default) or opt-in ``combined``
+   * - ``mps_routing_virtual_bonds``, ``mps_routing_truncation_weight``,
+       ``mps_routing_legacy_cap``
+     - QCSim and GPU MPS/MPO
+     - Experimental virtual-bond routing
+   * - ``auto_reduce``, ``enable_causal_cone_reduction``,
+       ``enable_observable_clustering``
+     - All
+     - Booleans, default true
+   * - ``min_cluster_qubits``, ``max_cluster_qubits``
+     - All
+     - Positive; the minimum must not exceed the maximum
+   * - ``observable_error_tolerance``
+     - All
+     - In (0, 1]
+   * - ``allow_reset_marginalization``, ``enable_sampling_reduction``
+     - All
+     - Booleans, default false
+   * - ``trajectory_policy``, ``trajectory_max_memory_mb``
+     - QCSim statevector/density matrix (policy also path integral)
+     - ``block_v1`` or ``shot_v1`` (default); positive MiB count
+
+An option for another backend or method raises ``UnsupportedFunctionError`` and an
+out-of-range value raises ``InvalidInputError``, before task allocation.
+Validation accepts GPU options without a GPU; run a small request on each deployed
+GPU backend, with ``QRMI_TEST_GPU=1`` for the opt-in numerical checks. Combined and
+virtual-bond routing trade runtime against truncation at finite bond caps. Sampling
+reduction changes a seeded run's random streams. Maestro 0.3.10 made
+``coherent_depolarizing`` isotropic, so its results differ from earlier libraries;
+QASM accepts qelib1.inc's ``rzz``, ``rxx`` and ``u0``.
 
 QRMI does not translate these options. Removed keys fail native validation before
 allocation of a task ID. Legacy ``SET_OPTIONS`` uses a separate contract; keys
@@ -383,13 +459,45 @@ requests suitable for either task runner or ``request_payload``:
   ``execution_metadata.gate_fusion`` alongside the numerical results.
 * ``native-mpo-wide.json`` queries a 65-qubit product state using a bitstring.
   Wide measurement results also retain string keys rather than integer conversion.
+* ``native-adjoint.json`` computes adjoint Jacobians for two parameter rows, with a
+  Pauli string, a weighted Pauli sum and a probability readout.
+* ``native-mirror-observables.json`` measures MPS truncation per observable with
+  ``mirror_fidelity``; lowering ``max_bond_dimension`` to 1 makes values drop below 1.
+* ``native-instructions.json`` uses instruction-array ``rzz``, ``noiseless``
+  basis changes, a ``pauli_channel`` and per-measurement ``readout_error``.
+
+Adjoint differentiation, observable mirror fidelity and these instruction fields
+need a Maestro library listing them in ``native.operations``, ``native.adjoint``
+and ``native.instructions``; older libraries reject them before task allocation.
+They use the existing ``request`` payload unchanged:
+
+- ``adjoint_expectation_values``, ``adjoint_jacobian`` and ``adjoint_vjp``
+  differentiate a unitary circuit on the QCSim CPU statevector. ``observables``
+  entries are Pauli strings, ``{"terms": [[coefficient, pauli], ...]}`` or
+  ``{"probabilities": [qubits]}``; ``parameter_rows`` replaces the circuit's
+  angles row by row, and ``adjoint_vjp`` takes ``cotangents[row][value]``.
+  Results report ``num_parameters``, ``num_values`` and ``circuit_parameters``
+  (the circuit's own angles in parameter order) with ``expectation_values``,
+  ``jacobian[row][value][parameter]`` or ``vjp[row][parameter]``. They carry no
+  seed.
+- ``mirror_fidelity`` with ``observables`` returns their expectations on the
+  executed mirror state instead of ``fidelity``. Unlike plain mirror fidelity, it
+  also runs on ``density_matrix`` and ``matrix_product_operator``.
+- Instruction arrays accept ``rxx``/``rzz``, ``"noiseless": true`` on gates,
+  ``readout_error`` on ``measure`` (a probability or ``{p_meas1_prep0,
+  p_meas0_prep1}``; counts only, so operations that remove terminal measurements,
+  including the adjoint operations and nested ``other_circuit``/``step_circuit``,
+  refuse it with ``UnsupportedFunctionError``), and ``pauli_channel`` with ``4**len(qubits)``
+  ``probabilities``. Mixed-state methods apply the channel exactly; pure-state
+  methods sample it per noise realization and need a trajectory ``noise`` block,
+  whose ``channels`` may be omitted.
 
 Pauli strings put qubit zero first; Qiskit Pauli labels require reversal when
 constructing these native observables. Basis integers put qubit zero in the least
 significant bit. Test asymmetric states/observables when converting conventions.
 Complex results use ``[real, imaginary]``. Full vectors and matrices still grow
 exponentially: bounded GPU staging memory does not remove native output limits
-or the socket's 64 MiB response bound.
+or the 64 MiB native result bound.
 
 Resource status and deployment discovery
 ----------------------------------------
