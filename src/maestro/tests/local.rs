@@ -563,23 +563,21 @@ fn submission_and_consumed_results_keep_completed_status() {
 #[test]
 fn rejected_submission_is_classified_and_cleaned_up() {
     let _lock = ENV_LOCK.lock().unwrap();
-    let server = Server::new(&[
-        ("SESSION 8 TASK CREATE", "OK 1"),
-        ("SESSION 8 TASK 1 SET_TYPE EXECUTE", "OK YES"),
-        ("SESSION 8 TASK 1 SET_QUBITS 1", "OK NO"),
-        ("SESSION 8 TASK 1 CANCEL", "OK YES"),
-    ]);
-    block_on(async {
-        assert_eq!(
-            resource(Some(8))
-                .task_start(payload())
-                .await
-                .unwrap_err()
-                .kind(),
-            QrmiErrorKind::InvalidInput
-        );
-    });
-    server.assert_done();
+    for cancellation in ["OK YES", "OK NO", "ERROR worker cleanup failed"] {
+        let server = Server::new(&[
+            ("SESSION 8 TASK CREATE", "OK 1"),
+            ("SESSION 8 TASK 1 SET_TYPE EXECUTE", "OK YES"),
+            ("SESSION 8 TASK 1 SET_QUBITS 1", "OK NO"),
+            ("SESSION 8 TASK 1 CANCEL", cancellation),
+        ]);
+        block_on(async {
+            let error = resource(Some(8)).task_start(payload()).await.unwrap_err();
+            assert_eq!(error.kind(), QrmiErrorKind::Other);
+            assert!(error.to_string().contains("task 1 was created"));
+            assert!(error.to_string().contains("set qubits"));
+        });
+        server.assert_done();
+    }
 }
 
 #[test]

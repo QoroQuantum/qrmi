@@ -100,6 +100,14 @@ Invalid JSON options are also classified as invalid input. Unclassified server a
 socket failures remain ``Other`` / ``QrmiError`` / code 100 with a diagnostic message.
 These should not be assumed to be authentication or input errors.
 
+With the QRMI 0.26.5 synchronization, a ``task_start()`` error other than
+``Other`` / ``QrmiError`` / code 100 guarantees that no task was created.
+Legacy Maestro submission creates a task before configuring it; a later failure
+therefore returns code 100 with the task ID and failure reason, even if cleanup
+cancellation succeeds. QRMI still attempts cancellation, but callers must not
+interpret this error as proof that the server created no task. Invalid UTF-8 in
+C payload strings is rejected before submission with code 109.
+
 With native API v2, ``target()`` returns capabilities and ``task_logs()`` returns
 structured diagnostics. Older servers return ``UnsupportedFunction`` for unsupported API
 negotiation. See :doc:`the native request guide <../maestro-native-api>`. Session

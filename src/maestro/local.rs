@@ -393,7 +393,13 @@ impl QuantumResource for MaestroLocal {
                     task.id
                 );
             }
-            return Err(error);
+            // task_start errors other than Other promise that no task was
+            // created. Cancellation does not undo creation, and may itself fail.
+            return Err(anyhow!(
+                "Maestro task {} was created but submission failed: {error}",
+                task.id
+            )
+            .into());
         }
         self.terminal_tasks.remove(&(task.session_id, task.id));
         Ok(task.id.to_string())
