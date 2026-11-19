@@ -441,7 +441,8 @@ catalog entries; per-backend limits appear as ``constraints``:
      - All
      - Booleans, default false
    * - ``trajectory_policy``, ``trajectory_max_memory_mb``
-     - QCSim statevector/density matrix (policy also path integral)
+     - QCSim statevector, density matrix, stabilizer, extended stabilizer, MPS and MPO
+       (policy also path integral)
      - ``block_v1`` or ``shot_v1`` (default); positive MiB count
 
 An option for another backend or method raises ``UnsupportedFunctionError`` and an

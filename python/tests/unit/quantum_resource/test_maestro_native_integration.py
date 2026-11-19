@@ -210,6 +210,13 @@ def test_fixed_noisy_shots_remain_independent(native_resource, backend, method):
             {"kind": "readout", "targets": [0], "probability": 0.5},
         ],
     }
+    # Since Maestro 0.3.15 the QCSim statevector and matrix product state draw
+    # relaxation from their state as each shot runs, so every shot is a
+    # realization of its own.
+    samples_channels = backend == "qcsim" and method in {
+        "statevector",
+        "matrix_product_state",
+    }
     previous = None
     for _ in range(2):
         task = native_resource.task_start(request_payload(document))
@@ -218,7 +225,7 @@ def test_fixed_noisy_shots_remain_independent(native_resource, backend, method):
         assert result["execution_metadata"]["backend"] == backend
         assert result["execution_metadata"]["method"] == method
         assert result["execution_metadata"]["selection"] == "fixed"
-        assert result["noise"]["realizations"] == 1
+        assert result["noise"]["realizations"] == (4096 if samples_channels else 1)
         assert set(result["counts"]) == {"00", "01", "10", "11"}
         assert sum(result["counts"].values()) == 4096
         assert all(700 < count < 1350 for count in result["counts"].values())
@@ -482,7 +489,12 @@ def test_exact_noise_capabilities_and_retained_logs(native_resource):
     ],
 )
 def test_thermal_approximation_matches_python_policy(native_resource, method):
-    """Accept sampled T2>T1 and retain its warning through the native worker."""
+    """Keep T2>T1 relaxation unclamped through the native worker.
+
+    Mixed states apply the channel exactly. Since Maestro 0.3.15 the statevector
+    and the matrix product state sample the channel itself from their state, so
+    their trajectories average to the same value instead of clamping T2 to T1.
+    """
     document = native_request(method=method)
     document["noise"] = {
         "realizations": 256,
@@ -500,27 +512,16 @@ def test_thermal_approximation_matches_python_policy(native_resource, method):
     assert await_task(native_resource, task) == TaskStatus.Completed
     result = json.loads(native_resource.task_result(task).value)
     logs = json.loads(native_resource.task_logs(task))["logs"]
-    marker = "thermal_T2_clamped_to_T1"
+    assert "thermal_T2_clamped_to_T1" not in result["noise"]["approximations"]
+    assert "effective T2 clamped to T1" not in logs
+    exact = math.exp(-0.3 / 1.5)
     if method in {"statevector", "matrix_product_state"}:
-        assert marker in result["noise"]["approximations"]
-        assert logs.count("effective T2 clamped to T1") == 1
-        assert "circuit qubits [0]" in logs
-        document["noise"]["channels"][0]["t2"] = 1.0
-        clamped_task = native_resource.task_start(request_payload(document))
-        assert await_task(native_resource, clamped_task) == TaskStatus.Completed
-        clamped = json.loads(native_resource.task_result(clamped_task).value)
-        assert result["expectation_values"] == pytest.approx(
-            clamped["expectation_values"], abs=1e-12
-        )
-        assert marker not in clamped["noise"]["approximations"]
-        assert (
-            "effective T2 clamped to T1"
-            not in json.loads(native_resource.task_logs(clamped_task))["logs"]
-        )
+        assert result["noise"]["evaluation"] == "trajectories"
+        # A trajectory's <X> is 0 or about +-0.99, so 256 of them have a
+        # standard error near 0.03.
+        assert result["expectation_values"][0] == pytest.approx(exact, abs=0.1)
     else:
-        assert marker not in result["noise"]["approximations"]
-        assert "effective T2 clamped to T1" not in logs
-        assert result["expectation_values"][0] == pytest.approx(math.exp(-0.3 / 1.5))
+        assert result["expectation_values"][0] == pytest.approx(exact)
 
 
 @pytest.mark.parametrize(
@@ -1075,9 +1076,11 @@ def test_current_option_contract_through_qrmi(native_resource):
             {"min_cluster_qubits": 5, "max_cluster_qubits": 4},
             InvalidInputError,
         ),
+        # Every QCSim trajectory method takes a policy since Maestro 0.3.14;
+        # the tensor network runs no trajectories.
         (
             "qcsim",
-            "matrix_product_state",
+            "tensor_network",
             {"trajectory_policy": "shot_v1"},
             UnsupportedFunctionError,
         ),
@@ -1126,8 +1129,13 @@ def test_new_native_examples_through_qrmi(native_resource):
     document = example_doc("instructions")
     _, result = run_native(native_resource, document)
     assert result["counts"] == {"01": 32}
-    # Pure states sample the channel and need a trajectory noise block.
+    # The statevector samples the channel as each shot runs, with or without a
+    # noise block. Pure-state methods that do not sample channels take one
+    # Pauli per noise realization and need a trajectory noise block.
     document["simulator"]["method"] = "statevector"
+    _, result = run_native(native_resource, document)
+    assert result["counts"] == {"01": 32}
+    document["simulator"]["method"] = "path_integral"
     with pytest.raises(UnsupportedFunctionError, match="trajectory"):
         native_resource.task_start(request_payload(document))
     document["noise"] = {"realizations": 32}
